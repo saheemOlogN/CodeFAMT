@@ -1,5 +1,38 @@
 {
+  "name": "codefamt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n api,web \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "vite --host 127.0.0.1",
+    "dev:server": "node --watch server/index.js",
+    "worker": "node server/workers/judgeWorker.js",
+    "build": "vite build",
+    "start": "node server/index.js",
+    "test": "node --test tests/*.test.js",
+    "format": "prettier --write client server shared tests vite.config.js"
+  },
   "dependencies": {
-    "express": "^5.3.0"
+    "@monaco-editor/react": "^4.7.0",
+    "bullmq": "^5.58.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.0",
+    "express": "^5.3.0",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.7.0",
+    "lucide-react": "^0.468.0",
+    "mongoose": "^8.18.0",
+    "nodemailer": "^7.0.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.8.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.2.0",
+    "prettier": "^3.9.10",
+    "vite": "^7.1.0"
   }
 }

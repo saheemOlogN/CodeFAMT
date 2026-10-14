@@ -1,0 +1,15 @@
+import { Router } from 'express';
+import authRoutes from './authRoutes.js';
+import problemRoutes from './problemRoutes.js';
+import contestRoutes from './contestRoutes.js';
+import submissionRoutes from './submissionRoutes.js';
+import communityRoutes from './communityRoutes.js';
+import adminRoutes from './adminRoutes.js';
+const router = Router();
+router.use('/auth', authRoutes);
+router.use('/problems', problemRoutes);
+router.use('/contests', contestRoutes);
+router.use('/submissions', submissionRoutes);
+router.use('/community', communityRoutes);
+router.use('/admin', adminRoutes);
+export default router;
