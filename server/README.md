@@ -18,7 +18,7 @@ The npm scripts load `.env`, where `PORT=6767` sets the server port.
 
 | File | Stores |
 | --- | --- |
-| `models/user.model.js` | Name, college email, password hash, role, and email verification state. |
+| `models/user.model.js` | Name, department, year, college email, password hash, role, and email verification state. |
 | `models/otp.model.js` | One current email-verification OTP hash per user, expiry, attempts, and last send time. |
 | `models/problem.model.js` | Statement, difficulty, tags, public examples, limits, visibility, and author. |
 | `models/testCase.model.js` | Hidden judging inputs and expected outputs for a problem. |
@@ -47,14 +47,60 @@ before the start time fail document validation. Each problem defaults to 100
 points. The planned scoring rule is full points once per accepted problem;
 tie-break rules will be defined when we build the contest controller.
 
-## What comes with controllers
+## Auth controller
 
-The models are defined, but MongoDB is not connected. Indexes, OTP cleanup,
-registration, judging, and live leaderboards are not running yet.
+`controllers/auth.controller.js` exports four plain functions:
 
-- Hash passwords and OTPs before storing them. Enforce OTP expiry, attempt limits,
-  resend delays, and single use. Expiry indexes clean up in the background; they
-  do not replace checking `expiresAt` during verification.
+| Function | Request body | Action |
+| --- | --- | --- |
+| `register` | `name`, `email`, `password`, `department`, `year` | Validate the form, create an unverified student if needed, and send an OTP. |
+| `verifyOtp` | The same registration fields plus `otp` as a six-digit string | Check and consume the OTP, then save the final profile and password and verify the account. |
+| `resendOtp` | `email` | Send a new OTP to an unverified account after the cooldown. |
+| `login` | `email`, `password` | Check the password and verification state, then return a one-hour bearer token and safe user fields. |
+
+For registration, use a body like this:
+
+```json
+{
+  "name": "Student Name",
+  "email": "student@famt.ac.in",
+  "password": "a-long-unique-password",
+  "department": "it",
+  "year": "2nd"
+}
+```
+
+For verification, send those same fields plus `"otp": "123456"`, using the
+actual code from email. The frontend can keep the registration form in memory
+until verification completes. Setting the final password and profile only
+after OTP proof ensures the mailbox owner chooses their account credentials.
+Verified accounts cannot be changed through this registration flow.
+
+`utils/sendOtp.js` is shared by registration and resend. OTPs expire after five
+minutes, allow five verification attempts, and can be resent after 60 seconds.
+Passwords are bcrypt hashes and OTPs are keyed hashes bound to the user.
+The server returns neither passwords nor OTPs. Email failures keep the pending
+account and the cooldown; registration or resend can be retried after 60 seconds.
+
+`.env` now has generated `JWT_SECRET` and `OTP_SECRET` values. Fill in
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM` using your
+mail provider's settings. The helper uses TLS on port 465 and requires STARTTLS
+on other ports, such as 587. It fails clearly while mail settings are missing.
+
+The controller functions exist, but no auth routes or database connection are
+wired yet. `index.js` remains the small server startup file. No live email or
+MongoDB integration has been tested.
+
+## Next steps
+
+- Connect MongoDB and build the unique email and OTP-user indexes before serving
+  registration requests. Concurrent registration and resend rely on those indexes.
+- Add auth routes, JSON parsing, request rate limits for registration/login/OTP,
+  and authentication middleware. The middleware must verify HS256 tokens and
+  load the current verified user by the token's `sub`; never trust a client role.
+  The current OTP limits are per account, not a replacement for route rate limits.
+- Continue with problem and contest controllers. Indexes, OTP cleanup, judging,
+  and live leaderboards require the connected database and later implementation.
 - Check referenced records exist, users are verified, and admin actions are
   authorized. A `ref` does not enforce these rules. Never accept roles, verdicts,
   scores, verification flags, or submission timestamps from a request body.
@@ -78,7 +124,11 @@ registration, judging, and live leaderboards are not running yet.
   or choosing supported languages. Redis will queue jobs and can cache scores;
   these MongoDB records remain the durable data. No Redis model is needed.
 
-The next implementation step is the registration controller.
+The next implementation step is connecting the auth controller to routes and MongoDB.
 
 [Mongoose validation](https://mongoosejs.com/docs/validation.html) and
 [MongoDB TTL indexes](https://www.mongodb.com/docs/manual/core/index-ttl/)
+
+[Nodemailer SMTP](https://nodemailer.com/smtp),
+[bcryptjs](https://www.npmjs.com/package/bcryptjs), and
+[jsonwebtoken](https://github.com/auth0/node-jsonwebtoken)
