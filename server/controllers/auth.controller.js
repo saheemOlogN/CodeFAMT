@@ -193,7 +193,7 @@ async function login(req, res) {
             return res.status(503).json({ message: "Login is not configured yet" });
         }
 
-        const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash");
+        const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash +tokenVersion");
 
         if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
             return res.status(401).json({ message: "Invalid email or password" });
@@ -203,7 +203,7 @@ async function login(req, res) {
             return res.status(403).json({ message: "Verify your college email before logging in" });
         }
 
-        const token = jwt.sign({}, process.env.JWT_SECRET, {
+        const token = jwt.sign({ version: user.tokenVersion }, process.env.JWT_SECRET, {
             subject: user._id.toString(),
             algorithm: "HS256",
             expiresIn: "1h",
@@ -226,4 +226,13 @@ async function login(req, res) {
     }
 }
 
-module.exports = { register, verifyOtp, resendOtp, login };
+async function logout(req, res) {
+    try {
+        await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
+        return res.status(200).json({ message: "Logged out on all devices" });
+    } catch {
+        return res.status(500).json({ message: "Could not log out" });
+    }
+}
+
+module.exports = { register, verifyOtp, resendOtp, login, logout };

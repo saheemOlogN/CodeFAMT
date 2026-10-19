@@ -131,6 +131,10 @@ async function updateProblem(req, res) {
             return res.status(404).json({ message: "Problem not found" });
         }
 
+        if (problem.visibility !== "draft") {
+            return res.status(409).json({ message: "Published problems cannot be changed" });
+        }
+
         if (await Contest.exists({ "problems.problem": problem._id, status: { $ne: "draft" } }) ||
             await Submission.exists({ problem: problem._id })) {
             return res.status(409).json({ message: "Problems used in published contests or submissions cannot be changed" });
@@ -143,10 +147,12 @@ async function updateProblem(req, res) {
         }
 
         if (problem.visibility !== "draft") {
-            const tests = await TestCase.find({ problem: problem._id }).select("+input +expectedOutput");
+            const tests = await TestCase.find({ problem: problem._id }).select("+input +expectedOutput").limit(101);
 
-            if (!tests.length || tests.some((test) => typeof test.input !== "string" || typeof test.expectedOutput !== "string")) {
-                return res.status(400).json({ message: "Add valid test cases before publishing the problem" });
+            if (!tests.length || tests.length > 100 || tests.some((test) => typeof test.input !== "string" ||
+                typeof test.expectedOutput !== "string" || Buffer.byteLength(test.input) > 100000 ||
+                Buffer.byteLength(test.expectedOutput) > 100000)) {
+                return res.status(400).json({ message: "Add 1 to 100 valid test cases before publishing the problem" });
             }
         }
 

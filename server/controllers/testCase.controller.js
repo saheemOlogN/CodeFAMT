@@ -17,15 +17,19 @@ async function createTestCase(req, res) {
         const { input, expectedOutput } = req.body || {};
 
         if (typeof input !== "string" || typeof expectedOutput !== "string" ||
-            input.length > 100000 || expectedOutput.length > 100000 ||
+            Buffer.byteLength(input) > 100000 || Buffer.byteLength(expectedOutput) > 100000 ||
             Object.keys(req.body).some((field) => !["input", "expectedOutput"].includes(field))) {
-            return res.status(400).json({ message: "Input and expectedOutput must be strings of at most 100000 characters each" });
+            return res.status(400).json({ message: "Input and expectedOutput must be strings of at most 100000 UTF-8 bytes each" });
         }
 
         const problem = await Problem.findById(req.params.problemId);
 
         if (!problem) {
             return res.status(404).json({ message: "Problem not found" });
+        }
+
+        if (problem.visibility !== "draft") {
+            return res.status(409).json({ message: "Test cases of published problems cannot be changed" });
         }
 
         if (await Contest.exists({ "problems.problem": problem._id, status: { $ne: "draft" } }) ||
@@ -99,12 +103,18 @@ async function updateTestCase(req, res) {
 
         if (Array.isArray(body) || !Object.keys(body).length ||
             Object.keys(body).some((field) => !["input", "expectedOutput"].includes(field) ||
-                typeof body[field] !== "string" || body[field].length > 100000)) {
-            return res.status(400).json({ message: "Send input or expectedOutput as strings of at most 100000 characters each" });
+                typeof body[field] !== "string" || Buffer.byteLength(body[field]) > 100000)) {
+            return res.status(400).json({ message: "Send input or expectedOutput as strings of at most 100000 UTF-8 bytes each" });
         }
 
-        if (!(await Problem.exists({ _id: req.params.problemId }))) {
+        const problem = await Problem.findById(req.params.problemId);
+
+        if (!problem) {
             return res.status(404).json({ message: "Problem not found" });
+        }
+
+        if (problem.visibility !== "draft") {
+            return res.status(409).json({ message: "Test cases of published problems cannot be changed" });
         }
 
         const testCase = await TestCase.findOne({ _id: req.params.id, problem: req.params.problemId }).select("+input +expectedOutput");
@@ -147,6 +157,10 @@ async function deleteTestCase(req, res) {
             return res.status(404).json({ message: "Problem not found" });
         }
 
+        if (problem.visibility !== "draft") {
+            return res.status(409).json({ message: "Test cases of published problems cannot be changed" });
+        }
+
         const testCase = await TestCase.findOne({ _id: req.params.id, problem: problem._id });
 
         if (!testCase) {
@@ -155,10 +169,6 @@ async function deleteTestCase(req, res) {
 
         if (await Contest.exists({ "problems.problem": problem._id }) || await Submission.exists({ problem: problem._id })) {
             return res.status(409).json({ message: "Test cases used in contests or submissions cannot be deleted" });
-        }
-
-        if (problem.visibility !== "draft" && await TestCase.countDocuments({ problem: problem._id }) <= 1) {
-            return res.status(409).json({ message: "Keep at least one test case for a published problem" });
         }
 
         await testCase.deleteOne();
