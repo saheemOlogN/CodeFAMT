@@ -6,6 +6,7 @@ const userSchema = new mongoose.Schema(
             type: String,
             required: true,
             trim: true,
+            maxlength: 100,
         },
         department: {
             type: String,
@@ -34,6 +35,7 @@ const userSchema = new mongoose.Schema(
             unique: true,
             trim: true,
             lowercase: true,
+            maxlength: 254,
             match: [/^[^\s@]+@famt\.ac\.in$/, "Use your @famt.ac.in email"],
         },
         passwordHash: {
@@ -53,6 +55,8 @@ const userSchema = new mongoose.Schema(
         tokenVersion: {
             type: Number,
             default: 0,
+            min: 0,
+            validate: Number.isSafeInteger,
             select: false,
         },
     },

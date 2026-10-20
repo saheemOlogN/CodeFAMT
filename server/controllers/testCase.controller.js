@@ -17,9 +17,10 @@ async function createTestCase(req, res) {
         const { input, expectedOutput } = req.body || {};
 
         if (typeof input !== "string" || typeof expectedOutput !== "string" ||
-            Buffer.byteLength(input) > 100000 || Buffer.byteLength(expectedOutput) > 100000 ||
+            input.includes("\0") || expectedOutput.includes("\0") ||
+            Buffer.byteLength(input) > 100000 || Buffer.byteLength(expectedOutput) > 65536 ||
             Object.keys(req.body).some((field) => !["input", "expectedOutput"].includes(field))) {
-            return res.status(400).json({ message: "Input and expectedOutput must be strings of at most 100000 UTF-8 bytes each" });
+            return res.status(400).json({ message: "Use strings without NUL characters: input up to 100000 bytes and expectedOutput up to 65536 bytes" });
         }
 
         const problem = await Problem.findById(req.params.problemId);
@@ -103,8 +104,9 @@ async function updateTestCase(req, res) {
 
         if (Array.isArray(body) || !Object.keys(body).length ||
             Object.keys(body).some((field) => !["input", "expectedOutput"].includes(field) ||
-                typeof body[field] !== "string" || Buffer.byteLength(body[field]) > 100000)) {
-            return res.status(400).json({ message: "Send input or expectedOutput as strings of at most 100000 UTF-8 bytes each" });
+                typeof body[field] !== "string" || body[field].includes("\0") ||
+                Buffer.byteLength(body[field]) > (field === "input" ? 100000 : 65536))) {
+            return res.status(400).json({ message: "Use strings without NUL characters: input up to 100000 bytes and expectedOutput up to 65536 bytes" });
         }
 
         const problem = await Problem.findById(req.params.problemId);
@@ -167,8 +169,9 @@ async function deleteTestCase(req, res) {
             return res.status(404).json({ message: "Test case not found" });
         }
 
-        if (await Contest.exists({ "problems.problem": problem._id }) || await Submission.exists({ problem: problem._id })) {
-            return res.status(409).json({ message: "Test cases used in contests or submissions cannot be deleted" });
+        if (await Contest.exists({ "problems.problem": problem._id, status: { $ne: "draft" } }) ||
+            await Submission.exists({ problem: problem._id })) {
+            return res.status(409).json({ message: "Test cases used in published contests or submissions cannot be deleted" });
         }
 
         await testCase.deleteOne();

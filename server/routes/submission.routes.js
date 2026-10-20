@@ -1,5 +1,5 @@
 const express = require("express");
-const { runCode, submitCode, getSubmissions, getSubmission, retrySubmission } = require("../controllers/submission.controller");
+const { runCode, getRun, submitCode, getSubmissions, getSubmission, retrySubmission } = require("../controllers/submission.controller");
 const requireAuth = require("../middleware/auth.middleware");
 const { executionLimiter } = require("../middleware/rateLimit.middleware");
 
@@ -13,6 +13,7 @@ router.use(requireAuth);
 router.get("/", getSubmissions);
 router.post("/run", executionLimiter, runCode);
 router.post("/", executionLimiter, submitCode);
+router.get("/runs/:id", getRun);
 router.get("/:id", getSubmission);
 router.post("/:id/retry", executionLimiter, retrySubmission);
 

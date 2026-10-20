@@ -159,25 +159,22 @@ test("failed login attempts are limited per normalized email", async () => {
     assert.equal(response.status, 429);
 });
 
-test("admin changes serialize across controllers and release after completion or failure", async () => {
-    let release;
-    const waiting = new Promise(resolve => { release = resolve; });
-    const slow = adminWrite(async () => { await waiting; });
-    const pending = slow({}, {}, error => { throw error; });
-    const res = { status(code) { this.code = code; return this; }, json(body) { this.body = body; return this; } };
-    let ran = false;
-    const other = adminWrite(async () => { ran = true; });
-    await other({}, res, error => { throw error; });
+test("admin responses wait for commit and controller failures roll back", async (t) => {
+    let committed = false;
+    t.mock.method(require("mongoose").connection, "transaction", async callback => {
+        await callback({});
+        committed = true;
+    });
+    t.mock.method(require("../models/adminLock.model"), "updateOne", async () => ({ matchedCount: 1 }));
+    const res = { status(code) { this.code = code; return this; }, json(body) {
+        assert.equal(committed, this.code < 400);
+        this.body = body;
+        return this;
+    } };
+    await adminWrite(async (req, response) => response.status(201).json({ saved: true }))({}, res, error => { throw error; });
+    assert.equal(res.code, 201);
+    committed = false;
+    await adminWrite(async (req, response) => response.status(409).json({ message: "Conflict" }))({}, res, error => { throw error; });
     assert.equal(res.code, 409);
-    assert.equal(ran, false);
-    release();
-    await pending;
-    await other({}, {}, error => { throw error; });
-    assert.equal(ran, true);
-    let forwarded;
-    await adminWrite(async () => { throw new Error("test failure"); })({}, {}, error => { forwarded = error; });
-    assert.equal(forwarded.message, "test failure");
-    ran = false;
-    await other({}, {}, error => { throw error; });
-    assert.equal(ran, true);
+    assert.equal(committed, false);
 });

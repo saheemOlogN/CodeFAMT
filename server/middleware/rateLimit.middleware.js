@@ -1,6 +1,17 @@
 const { rateLimit } = require("express-rate-limit");
+const { RedisStore } = require("rate-limit-redis");
+const { getRedis } = require("../config/redis");
+
+function sharedStore(name) {
+    if (!process.env.REDIS_URL) return undefined;
+    return new RedisStore({
+        sendCommand: (...args) => getRedis().call(...args),
+        prefix: `${process.env.REDIS_PREFIX || "codefamt"}:limit:${name}:`,
+    });
+}
 
 const authLimiter = rateLimit({
+    store: sharedStore("auth"),
     windowMs: 15 * 60000,
     limit: 1000,
     standardHeaders: true,
@@ -9,6 +20,7 @@ const authLimiter = rateLimit({
 });
 
 const accountLimiter = rateLimit({
+    store: sharedStore("account"),
     windowMs: 15 * 60000,
     limit: 20,
     keyGenerator: (req) => {
@@ -21,6 +33,7 @@ const accountLimiter = rateLimit({
 });
 
 const executionLimiter = rateLimit({
+    store: sharedStore("execution"),
     windowMs: 60000,
     limit: 5,
     keyGenerator: (req) => req.user._id.toString(),
@@ -30,6 +43,7 @@ const executionLimiter = rateLimit({
 });
 
 const passwordLimiter = rateLimit({
+    store: sharedStore("password"),
     windowMs: 15 * 60000,
     limit: 10,
     keyGenerator: (req) => req.user._id.toString(),

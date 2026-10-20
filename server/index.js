@@ -1,5 +1,11 @@
 const express = require("express");
 const cors = require("cors");
+const http = require("node:http");
+const mongoose = require("mongoose");
+const initializeSocket = require("./config/socket");
+const { initializeQueue, closeQueue } = require("./utils/executionQueue");
+const { closeRedis } = require("./config/redis");
+const { closeRealtime } = require("./utils/realtime");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth.routes");
 const userRoutes = require("./routes/user.routes");
@@ -22,12 +28,27 @@ app.use("/api/submissions", submissionRoutes);
 app.use(handleError);
 
 if (require.main === module) {
-    connectDB().then(() => {
-        app.listen(port, () => {
+    connectDB().then(async () => {
+        await initializeQueue();
+        const server = http.createServer(app);
+        const io = await initializeSocket(server);
+        let stopping = false;
+        async function stop() {
+            if (stopping) return;
+            stopping = true;
+            await new Promise(resolve => io.close(resolve));
+            await closeQueue();
+            await closeRealtime();
+            closeRedis();
+            await mongoose.disconnect();
+        }
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+        server.listen(port, () => {
             console.log(`CODEFAMT API is running at http://localhost:${port}`);
         });
     }).catch((error) => {
-        console.error("Could not start the server. Check MongoDB configuration:", error.name);
+        console.error("Could not start the server. Check MongoDB and Redis configuration:", error.name);
         process.exit(1);
     });
 }

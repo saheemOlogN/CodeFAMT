@@ -75,6 +75,18 @@ const submissionSchema = new mongoose.Schema(
             type: Date,
             default: null,
         },
+        queueVersion: { type: Number, default: 0 },
+        processingToken: { type: String, default: null, select: false },
+        judgeProgress: {
+            type: new mongoose.Schema({
+                nextTest: { type: Number, default: 0 },
+                passedTests: { type: Number, default: 0 },
+                executionTimeMs: { type: Number, default: 0 },
+                memoryUsedMb: { type: Number, default: 0 },
+            }, { _id: false }),
+            default: () => ({}),
+            select: false,
+        },
     },
     { timestamps: true }
 );
@@ -82,5 +94,6 @@ const submissionSchema = new mongoose.Schema(
 submissionSchema.index({ user: 1, createdAt: -1 });
 submissionSchema.index({ contest: 1, status: 1, createdAt: 1 });
 submissionSchema.index({ contest: 1, user: 1, status: 1, createdAt: 1 });
+submissionSchema.index({ status: 1, _id: 1 });
 
 module.exports = mongoose.model("Submission", submissionSchema);

@@ -150,8 +150,8 @@ async function updateProblem(req, res) {
             const tests = await TestCase.find({ problem: problem._id }).select("+input +expectedOutput").limit(101);
 
             if (!tests.length || tests.length > 100 || tests.some((test) => typeof test.input !== "string" ||
-                typeof test.expectedOutput !== "string" || Buffer.byteLength(test.input) > 100000 ||
-                Buffer.byteLength(test.expectedOutput) > 100000)) {
+                typeof test.expectedOutput !== "string" || test.input.includes("\0") || test.expectedOutput.includes("\0") ||
+                Buffer.byteLength(test.input) > 100000 || Buffer.byteLength(test.expectedOutput) > 65536)) {
                 return res.status(400).json({ message: "Add 1 to 100 valid test cases before publishing the problem" });
             }
         }

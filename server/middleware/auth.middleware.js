@@ -20,7 +20,8 @@ async function requireAuth(req, res, next) {
         return res.status(401).json({ message: "Invalid or expired login token" });
     }
 
-    if (!mongoose.isObjectIdOrHexString(payload.sub) || !Number.isInteger(payload.version)) {
+    if (!mongoose.isObjectIdOrHexString(payload.sub) || !Number.isSafeInteger(payload.version) ||
+        payload.version < 0 || !Number.isInteger(payload.exp)) {
         return res.status(401).json({ message: "Invalid login token" });
     }
 

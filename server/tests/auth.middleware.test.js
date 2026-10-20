@@ -80,7 +80,10 @@ test("claims require an ObjectId subject and integer token version", async t => 
         token({}),
         token({ version: "3" }),
         token({ version: 1.5 }),
+        token({ version: -1 }),
+        token({ version: Number.MAX_SAFE_INTEGER + 1 }),
         token({ version: null }),
+        jwt.sign({ version: 3 }, secret, { algorithm: "HS256", subject: userId }),
         token({ version: 3 }, { subject: "invalid-user-id" }),
         jwt.sign({ version: 3 }, secret, { algorithm: "HS256", expiresIn: "1h" }),
     ]) {

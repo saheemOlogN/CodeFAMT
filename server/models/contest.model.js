@@ -39,7 +39,7 @@ const contestSchema = new mongoose.Schema(
                         default: 100,
                         required: true,
                         min: 1,
-                        validate: Number.isInteger,
+                        validate: Number.isSafeInteger,
                     },
                 },
             ],
@@ -47,9 +47,11 @@ const contestSchema = new mongoose.Schema(
             validate: {
                 validator: function (problems) {
                     const ids = problems.map((entry) => String(entry.problem));
-                    return new Set(ids).size === ids.length;
+                    const totalPoints = problems.reduce((total, entry) => total + entry.points, 0);
+                    return problems.length <= 20 && new Set(ids).size === ids.length &&
+                        Number.isSafeInteger(totalPoints);
                 },
-                message: "A problem can only appear once in a contest",
+                message: "Use up to 20 unique problems with a safe integer total score",
             },
         },
         status: {
@@ -74,5 +76,6 @@ const contestSchema = new mongoose.Schema(
 );
 
 contestSchema.index({ status: 1, startTime: 1 });
+contestSchema.index({ "problems.problem": 1, status: 1 });
 
 module.exports = mongoose.model("Contest", contestSchema);

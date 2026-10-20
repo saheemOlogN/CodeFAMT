@@ -5,7 +5,7 @@ const connectDB = require("../config/db");
 const User = require("../models/user.model");
 const Submission = require("../models/submission.model");
 
-test("startup prepares model indexes and makes interrupted submissions retryable", async (t) => {
+test("startup prepares indexes and queue versions without resetting active jobs", async (t) => {
     let connected = false;
     const initialized = [];
     t.mock.method(mongoose, "connect", async () => { connected = true; });
@@ -16,18 +16,18 @@ test("startup prepares model indexes and makes interrupted submissions retryable
         });
     }
     t.mock.method(User, "updateMany", async (filter, update) => {
-        assert.equal(initialized.length, 8);
+        assert.equal(initialized.length, 11);
         assert.deepEqual(filter, { tokenVersion: { $exists: false } });
         assert.deepEqual(update, { $set: { tokenVersion: 0 } });
         return { modifiedCount: 0 };
     });
     t.mock.method(Submission, "updateMany", async (filter, update) => {
-        assert.equal(initialized.length, 8);
-        assert.deepEqual(filter, { status: "running" });
-        assert.equal(update.$set.status, "internal_error");
-        assert.ok(update.$set.judgedAt instanceof Date);
+        assert.equal(initialized.length, 11);
+        assert.deepEqual(filter, { queueVersion: { $exists: false } });
+        assert.deepEqual(update, { $set: { queueVersion: 0 } });
         return { modifiedCount: 1 };
     });
+    t.mock.method(require("../models/adminLock.model"), "updateOne", async () => ({ matchedCount: 1 }));
     await connectDB();
     assert.equal(Submission.updateMany.mock.callCount(), 1);
 });

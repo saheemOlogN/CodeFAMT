@@ -169,6 +169,14 @@ async function updateContest(req, res) {
                     return res.status(400).json({ message: "Add at least one test case to every contest problem before publishing" });
                 }
 
+                if (await Contest.exists({
+                    _id: { $ne: contest._id },
+                    status: "published",
+                    "problems.problem": { $in: problemIds },
+                })) {
+                    return res.status(409).json({ message: "Use new problems that are not part of another published contest" });
+                }
+
                 if (contest.startTime <= new Date()) {
                     return res.status(400).json({ message: "Publish the contest before its start time" });
                 }

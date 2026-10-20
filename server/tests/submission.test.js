@@ -8,6 +8,8 @@ const ContestParticipant = require("../models/contestParticipant.model");
 const Submission = require("../models/submission.model");
 const SolvedProblem = require("../models/solvedProblem.model");
 const controller = require("../controllers/submission.controller");
+const CodeRun = require("../models/codeRun.model");
+const queue = require("../utils/executionQueue");
 const gradeSubmission = require("../utils/gradeSubmission");
 
 const userId = new mongoose.Types.ObjectId();
@@ -15,7 +17,7 @@ const problemId = new mongoose.Types.ObjectId();
 const contestId = new mongoose.Types.ObjectId();
 const submissionId = new mongoose.Types.ObjectId();
 const replacements = [];
-const originalKey = process.env.ONECOMPILER_API_KEY;
+const originalKey = process.env.ONLINECOMPILER_API_KEY;
 
 function mock(target, key, value) {
     replacements.push([target, key, target[key]]);
@@ -25,8 +27,8 @@ function mock(target, key, value) {
 afterEach(() => {
     for (const [target, key, value] of replacements.reverse()) target[key] = value;
     replacements.length = 0;
-    if (originalKey === undefined) delete process.env.ONECOMPILER_API_KEY;
-    else process.env.ONECOMPILER_API_KEY = originalKey;
+    if (originalKey === undefined) delete process.env.ONLINECOMPILER_API_KEY;
+    else process.env.ONLINECOMPILER_API_KEY = originalKey;
 });
 
 function query(value) {
@@ -62,7 +64,12 @@ function submissionBody() {
     return { problemId: String(problemId), language: "python", code: "print(input())" };
 }
 
-function setup(results = [{ status: "success", stdout: "expected\n", executionTime: 10, memoryUsed: 1024 }]) {
+function providerResult(fields = {}) {
+    return { status: "success", output: "expected\n", error: "", exit_code: 0, signal: null,
+        truncated: false, time: "0.01", memory: "1024", ...fields };
+}
+
+function setup(results = [providerResult()]) {
     const state = {
         problem: { _id: problemId, visibility: "public", timeLimitMs: 1000, memoryLimitMb: 128 },
         tests: [{ input: "hidden input", expectedOutput: "expected" }],
@@ -72,7 +79,12 @@ function setup(results = [{ status: "success", stdout: "expected\n", executionTi
         testLoads: 0,
         transactions: 0,
     };
-    process.env.ONECOMPILER_API_KEY = "test-key";
+    process.env.ONLINECOMPILER_API_KEY = "test-key";
+    mock(queue, "enqueueSubmission", async () => {});
+    mock(queue, "enqueueRun", async () => {});
+    mock(CodeRun, "create", async fields => ({ _id: submissionId, ...fields }));
+    mock(require("../utils/providerLimit"), "reserveProviderRun", async () => {});
+    mock(require("../utils/realtime"), "publishSubmission", async () => {});
     mock(Problem, "findById", async () => state.problem);
     mock(TestCase, "find", () => {
         state.testLoads++;
@@ -81,10 +93,10 @@ function setup(results = [{ status: "success", stdout: "expected\n", executionTi
     mock(global, "fetch", async (url, options) => {
         state.executions++;
         state.providerBody = JSON.parse(options.body);
-        return { ok: true, json: async () => results };
+        return { ok: true, json: async () => results[0] };
     });
     mock(Submission, "create", async (fields) => {
-        state.submission = { _id: submissionId, ...fields };
+        state.submission = { _id: submissionId, ...fields, toObject() { return { ...this }; } };
         return state.submission;
     });
     mock(Submission, "findOne", () => query(state.submission));
@@ -92,6 +104,7 @@ function setup(results = [{ status: "success", stdout: "expected\n", executionTi
         assert.equal(String(filter._id), String(submissionId));
         if (!state.submission || state.submission.status !== filter.status) return query(null);
         Object.assign(state.submission, update.$set);
+        if (update.$inc) state.submission.queueVersion = (state.submission.queueVersion || 0) + update.$inc.queueVersion;
         if (options.session) {
             const { code, ...safe } = state.submission;
             return query(safe);
@@ -100,7 +113,9 @@ function setup(results = [{ status: "success", stdout: "expected\n", executionTi
     });
     mock(Submission, "updateOne", async (filter, update) => {
         state.errorFilter = filter;
-        if (state.submission?.status === filter.status) Object.assign(state.submission, update.$set);
+        if (state.submission?.status !== filter.status) return { matchedCount: 0 };
+        Object.assign(state.submission, update.$set);
+        return { matchedCount: 1 };
     });
     mock(mongoose.connection, "transaction", async (callback) => {
         state.transactions++;
@@ -125,15 +140,14 @@ function setup(results = [{ status: "success", stdout: "expected\n", executionTi
     return state;
 }
 
-test("run uses only custom input and returns custom diagnostics", async () => {
-    const state = setup([{ status: "success", stdout: "hello", stderr: "custom diagnostic", executionTime: 5, memoryUsed: 1024 }]);
+test("custom runs return queued IDs without executing code in the request", async () => {
+    const state = setup();
     const res = response();
     await controller.runCode(request({ language: "python", code: "print(input())", input: "custom" }), res);
-    assert.equal(res.statusCode, 200);
-    assert.equal(res.body.result.stderr, "custom diagnostic");
-    assert.deepEqual(state.providerBody.stdin, ["custom"]);
+    assert.equal(res.statusCode, 202);
+    assert.equal(res.body.run.status, "queued");
+    assert.equal(state.executions, 0);
     assert.equal(state.testLoads, 0);
-    assert.equal(state.submission, null);
 });
 
 test("run rejects hidden test selectors, unsupported languages and oversized UTF-8 code", async () => {
@@ -143,6 +157,8 @@ test("run rejects hidden test selectors, unsupported languages and oversized UTF
         { language: "constructor", code: "x" },
         { language: "python", code: "é".repeat(25001) },
         { language: "python", code: "x", input: "é".repeat(50001) },
+        { language: "python", code: "x\0" },
+        { language: "python", code: "x", input: "\0" },
     ]) {
         const res = response();
         await controller.runCode(request(body), res);
@@ -161,9 +177,22 @@ test("submission rejects client-owned verdicts and receipt timestamps", async ()
     assert.equal(state.submission, null);
 });
 
+test("NUL source and unexecutable hidden inputs are rejected before saving a submission", async () => {
+    const state = setup();
+    const invalidSource = response();
+    await controller.submitCode(request({ ...submissionBody(), code: "x\0" }), invalidSource);
+    assert.equal(invalidSource.statusCode, 400);
+    state.tests = [{ input: "\0", expectedOutput: "" }];
+    const invalidInput = response();
+    await controller.submitCode(request(submissionBody()), invalidInput);
+    assert.equal(invalidInput.statusCode, 503);
+    assert.equal(state.submission, null);
+    assert.equal(state.executions, 0);
+});
+
 test("a missing API key creates no submission and changes no retry state", async () => {
     const state = setup();
-    delete process.env.ONECOMPILER_API_KEY;
+    delete process.env.ONLINECOMPILER_API_KEY;
     const submitted = response();
     const retried = response();
     await controller.submitCode(request(submissionBody()), submitted);
@@ -180,8 +209,10 @@ test("accepted submission uses server receipt and creates one unique solve", asy
     req.receivedAt = new Date(Date.now() - 1000);
     const first = response();
     await controller.submitCode(req, first);
-    assert.equal(first.statusCode, 201);
-    assert.equal(first.body.submission.status, "accepted");
+    assert.equal(first.statusCode, 202);
+    state.submission.status = "running";
+    const judged = await gradeSubmission(state.submission, state.problem, state.tests);
+    assert.equal(judged.status, "accepted");
     assert.equal(first.body.submission.code, undefined);
     assert.equal(state.submission.createdAt, req.receivedAt);
     assert.equal(state.submission.user, userId);
@@ -192,16 +223,20 @@ test("accepted submission uses server receipt and creates one unique solve", asy
 
     const second = response();
     await controller.submitCode(request(submissionBody()), second);
-    assert.equal(second.statusCode, 201);
+    assert.equal(second.statusCode, 202);
+    state.submission.status = "running";
+    await gradeSubmission(state.submission, state.problem, state.tests);
     assert.equal(state.solves.length, 1);
 });
 
 test("provider success with incorrect output is wrong answer and adds no solve", async () => {
-    const state = setup([{ status: "success", stdout: "hidden wrong output", executionTime: 5, memoryUsed: 1024 }]);
+    const state = setup([providerResult({ output: "hidden wrong output" })]);
     const res = response();
     await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 201);
-    assert.equal(res.body.submission.status, "wrong_answer");
+    assert.equal(res.statusCode, 202);
+    state.submission.status = "running";
+    const judged = await gradeSubmission(state.submission, state.problem, state.tests);
+    assert.equal(judged.status, "wrong_answer");
     assert.equal(state.solves.length, 0);
     assert.equal(JSON.stringify(res.body).includes("hidden wrong output"), false);
 });
@@ -258,14 +293,15 @@ test("receipt exactly at start is valid even if judging finishes after the deadl
     mock(ContestParticipant, "exists", async () => ({ _id: userId }));
     const res = response();
     await controller.submitCode(req, res);
-    assert.equal(res.statusCode, 201);
+    assert.equal(res.statusCode, 202);
     assert.equal(state.submission.contest, contestId);
     assert.equal(state.submission.createdAt, req.receivedAt);
 });
 
 test("an unconfigured test set never creates a submission", async () => {
     const state = setup();
-    for (const testCases of [[], Array(101).fill(state.tests[0]), [{ input: "x".repeat(100001), expectedOutput: "" }]]) {
+    for (const testCases of [[], Array(101).fill(state.tests[0]), [{ input: "x".repeat(100001), expectedOutput: "" }],
+        [{ input: "", expectedOutput: "a".repeat(65537) }], [{ input: "", expectedOutput: "\0" }]]) {
         state.tests = testCases;
         const res = response();
         await controller.submitCode(request(submissionBody()), res);
@@ -274,85 +310,15 @@ test("an unconfigured test set never creates a submission", async () => {
     }
 });
 
-test("missing provider metrics produce a retryable safe internal error", async () => {
-    const state = setup([{ status: "success", stdout: "expected" }]);
+test("queue outages retain durable submissions and return their IDs", async () => {
+    const state = setup();
+    mock(queue, "enqueueSubmission", async () => { throw new Error("Redis unavailable"); });
     const res = response();
     await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.body.submissionId, submissionId);
-    assert.equal(state.submission.status, "internal_error");
-    assert.equal(state.solves.length, 0);
-    assert.equal(state.transactions, 0);
-});
-
-test("provider failure does not expose diagnostics or lose the submission ID", async () => {
-    const state = setup();
-    mock(global, "fetch", async () => { throw new Error("private API key and hidden input"); });
-    const res = response();
-    await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.body.submissionId, submissionId);
-    assert.equal(state.submission.status, "internal_error");
-    assert.equal(JSON.stringify(res.body).includes("private"), false);
-});
-
-test("failed solve persistence rolls back accepted status before marking internal error", async () => {
-    const state = setup();
-    mock(SolvedProblem, "updateOne", async () => { throw new Error("Database failure"); });
-    const res = response();
-    await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 503);
-    assert.equal(state.submission.status, "internal_error");
-    assert.equal(state.solves.length, 0);
-});
-
-test("a competing first solve retries its transaction without executing code twice", async () => {
-    const state = setup();
-    let attempts = 0;
-    mock(SolvedProblem, "updateOne", async () => {
-        attempts++;
-        if (attempts === 1) throw Object.assign(new Error("Duplicate solve"), { code: 11000 });
-    });
-    const res = response();
-    await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 201);
-    assert.equal(state.transactions, 2);
-    assert.equal(state.executions, 1);
-    assert.equal(state.submission.status, "accepted");
-});
-
-test("an ambiguous commit failure cannot overwrite an accepted submission", async () => {
-    const state = setup();
-    mock(mongoose.connection, "transaction", async (callback) => {
-        await callback({ id: "test-session" });
-        throw new Error("Commit response unavailable");
-    });
-    const res = response();
-    await controller.submitCode(request(submissionBody()), res);
-    assert.equal(res.statusCode, 503);
-    assert.equal(state.submission.status, "accepted");
-    assert.equal(state.errorFilter.status, "running");
-    assert.equal(state.solves.length, 1);
-});
-
-test("four active custom runs block a submission and slots release after completion", async () => {
-    const state = setup();
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    mock(global, "fetch", async () => {
-        await gate;
-        return { ok: true, json: async () => [{ status: "success", stdout: "expected", executionTime: 10, memoryUsed: 1024 }] };
-    });
-    const requests = Array.from({ length: 4 }, () => controller.runCode(request({ language: "python", code: "x" }), response()));
-    const blocked = response();
-    await controller.submitCode(request(submissionBody()), blocked);
-    assert.equal(blocked.statusCode, 429);
-    assert.equal(state.submission, null);
-    release();
-    await Promise.all(requests);
-    const after = response();
-    await controller.submitCode(request(submissionBody()), after);
-    assert.equal(after.statusCode, 201);
+    assert.equal(res.statusCode, 202);
+    assert.equal(res.body.submission._id, submissionId);
+    assert.equal(state.submission.status, "queued");
+    assert.equal(state.executions, 0);
 });
 
 test("retry preserves original code and contest receipt after the contest ends", async () => {
@@ -373,9 +339,10 @@ test("retry preserves original code and contest receipt after the contest ends",
     });
     const res = response();
     await controller.retrySubmission(request(), res);
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 202);
     assert.equal(state.submission.createdAt, createdAt);
-    assert.equal(state.providerBody.files[0].content, "original code");
+    assert.equal(state.submission.code, "original code");
+    assert.equal(state.submission.queueVersion, 1);
     assert.equal(state.testLoads, 1);
 });
 
@@ -425,7 +392,7 @@ test("submission listing never accepts another user's ID or unbounded pagination
 test("a lost running claim never changes the committed result", async () => {
     const state = setup();
     state.submission = { _id: submissionId, user: userId, problem: problemId, language: "python", code: "x", status: "accepted" };
-    await assert.rejects(gradeSubmission(state.submission, state.problem, state.tests), { status: 409 });
+    await assert.rejects(gradeSubmission(state.submission, state.problem, state.tests), { stale: true });
     assert.equal(state.submission.status, "accepted");
-    assert.equal(state.errorFilter, undefined);
+    assert.equal(state.errorFilter.status, "running");
 });

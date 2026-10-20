@@ -166,6 +166,7 @@ test("publication saves only if the draft has not changed", async () => {
     mock(Contest, "findById", () => query(record));
     mock(Problem, "countDocuments", async () => 1);
     mock(TestCase, "distinct", async () => [problemId]);
+    mock(Contest, "exists", async () => null);
     record.save = async () => { saved = true; };
     const res = response();
 
@@ -175,6 +176,39 @@ test("publication saves only if the draft has not changed", async () => {
     assert.equal(saved, true);
     assert.equal(record.$where.status, "draft");
     assert.equal(record.$where.updatedAt, record.updatedAt);
+});
+
+test("publication rejects problems already exposed by another published contest", async () => {
+    const record = contest();
+    mock(Contest, "findById", () => query(record));
+    mock(Problem, "countDocuments", async () => 1);
+    mock(TestCase, "distinct", async () => [problemId]);
+    mock(Contest, "exists", async filter => {
+        assert.equal(String(filter._id.$ne), String(contestId));
+        assert.equal(filter.status, "published");
+        assert.deepEqual(filter["problems.problem"].$in, [problemId]);
+        return { _id: new mongoose.Types.ObjectId() };
+    });
+    record.save = async () => assert.fail("A reused problem must not be published");
+    const res = response();
+
+    await controller.updateContest(request({ status: "published" }), res);
+
+    assert.equal(res.statusCode, 409);
+});
+
+test("contest scores must remain exact integers when added together", async () => {
+    for (const entries of [
+        [{ problem: problemId, points: Number.MAX_SAFE_INTEGER + 1 }],
+        [
+            { problem: problemId, points: Number.MAX_SAFE_INTEGER },
+            { problem: new mongoose.Types.ObjectId(), points: 1 },
+        ],
+    ]) {
+        const res = response();
+        await controller.createContest(request({ ...contest().toObject(), problems: entries }), res);
+        assert.equal(res.statusCode, 400);
+    }
 });
 
 test("published and cancelled contests reject configuration changes", async () => {
@@ -251,6 +285,27 @@ test("problem access requires the contest to start and the user to join", async 
     const outsider = response();
     await controller.getContestProblem(request(), outsider);
     assert.equal(outsider.statusCode, 403);
+});
+
+test("problems open at the exact start time and joining closes at the exact end time", async t => {
+    const now = new Date("2026-10-20T10:00:00.000Z");
+    t.mock.timers.enable({ apis: ["Date"], now });
+    const record = contest({ status: "published", startTime: now, endTime: new Date(now.getTime() + 60000) });
+    mock(Contest, "findById", () => query(record));
+    mock(ContestParticipant, "exists", async () => ({ _id: userId }));
+    mock(Problem, "findById", () => query({ _id: problemId, title: "Sum" }));
+    const opened = response();
+
+    await controller.getContestProblem(request(), opened);
+
+    assert.equal(opened.statusCode, 200);
+    t.mock.timers.tick(60000);
+    mock(ContestParticipant, "updateOne", async () => assert.fail("An ended contest cannot receive new participants"));
+    const ended = response();
+
+    await controller.joinContest(request(), ended);
+
+    assert.equal(ended.statusCode, 409);
 });
 
 test("contest problem projection includes statements but never hidden tests", async () => {

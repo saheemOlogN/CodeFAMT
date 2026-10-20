@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const Otp = require("../models/otp.model");
 const sendOtp = require("../utils/sendOtp");
@@ -104,7 +105,8 @@ async function verifyOtp(req, res) {
             .update(`${user._id}:${otp}`)
             .digest("hex");
 
-        if (!crypto.timingSafeEqual(Buffer.from(otpHash, "hex"), Buffer.from(otpRecord.otpHash, "hex"))) {
+        if (typeof otpRecord.otpHash !== "string" || !/^[a-f0-9]{64}$/.test(otpRecord.otpHash) ||
+            !crypto.timingSafeEqual(Buffer.from(otpHash, "hex"), Buffer.from(otpRecord.otpHash, "hex"))) {
             return res.status(400).json({ message: "Invalid OTP" });
         }
 
@@ -114,37 +116,49 @@ async function verifyOtp(req, res) {
         user.passwordHash = await bcrypt.hash(password, 12);
         await user.validate();
 
-        const consumedOtp = await Otp.findOneAndDelete({
-            _id: otpRecord._id,
-            otpHash,
-            lastSentAt: otpRecord.lastSentAt,
-            expiresAt: { $gt: new Date() },
-        });
-
-        if (!consumedOtp) {
-            return res.status(400).json({ message: "OTP expired, was replaced or has already been used" });
-        }
-
-        const verifiedUser = await User.findOneAndUpdate(
-            { _id: user._id, isVerified: false },
-            {
-                $set: {
-                    name: user.name,
-                    department: user.department,
-                    year: user.year,
-                    passwordHash: user.passwordHash,
-                    isVerified: true,
+        await mongoose.connection.transaction(async (session) => {
+            const consumedOtp = await Otp.findOneAndDelete(
+                {
+                    _id: otpRecord._id,
+                    otpHash,
+                    lastSentAt: otpRecord.lastSentAt,
+                    expiresAt: { $gt: new Date() },
                 },
-            },
-            { new: true, runValidators: true }
-        );
+                { session }
+            );
 
-        if (!verifiedUser) {
-            return res.status(409).json({ message: "Account already verified. Please log in" });
-        }
+            if (!consumedOtp) {
+                const error = new Error("OTP expired, was replaced or has already been used");
+                error.status = 400;
+                throw error;
+            }
+
+            const verifiedUser = await User.findOneAndUpdate(
+                { _id: user._id, isVerified: false },
+                {
+                    $set: {
+                        name: user.name,
+                        department: user.department,
+                        year: user.year,
+                        passwordHash: user.passwordHash,
+                        isVerified: true,
+                    },
+                },
+                { new: true, runValidators: true, session }
+            );
+
+            if (!verifiedUser) {
+                const error = new Error("Account already verified. Please log in");
+                error.status = 409;
+                throw error;
+            }
+        });
 
         return res.status(200).json({ message: "Email verified. You can now log in" });
     } catch (error) {
+        if (error.status === 400 || error.status === 409) {
+            return res.status(error.status).json({ message: error.message });
+        }
         if (error.name === "ValidationError") {
             return res.status(400).json({ message: "Check your name, department and year" });
         }
@@ -229,6 +243,7 @@ async function login(req, res) {
 async function logout(req, res) {
     try {
         await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
+        await require("../utils/realtime").disconnectUser(req.user._id);
         return res.status(200).json({ message: "Logged out on all devices" });
     } catch {
         return res.status(500).json({ message: "Could not log out" });

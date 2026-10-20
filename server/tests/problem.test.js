@@ -271,6 +271,26 @@ test("the last test of a published problem cannot be removed", async (t) => {
     assert.equal(res.statusCode, 409);
 });
 
+test("draft contest test cases stay editable until publication", async t => {
+    let deleted = false;
+    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    t.mock.method(TestCase, "findOne", () => query({
+        _id: testId,
+        deleteOne: async () => { deleted = true; },
+    }));
+    t.mock.method(Contest, "exists", async filter => {
+        assert.deepEqual(filter, { "problems.problem": problemId, status: { $ne: "draft" } });
+        return null;
+    });
+    t.mock.method(Submission, "exists", async () => null);
+    const res = response();
+
+    await tests.deleteTestCase(request({ params: { id: testId, problemId } }), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(deleted, true);
+});
+
 test("database failures do not expose internal messages", async (t) => {
     t.mock.method(Problem, "findById", async () => { throw new Error("private database connection details"); });
     const res = response();
@@ -296,6 +316,17 @@ test("test size limits count UTF-8 bytes for both inputs and expected outputs", 
         for (const controller of [tests.createTestCase, tests.updateTestCase]) {
             const res = response();
             await controller(request({ body: { input: "", expectedOutput: "", [field]: "é".repeat(50001) } }), res);
+            assert.equal(res.statusCode, 400);
+        }
+    }
+});
+
+test("hidden tests reject NUL characters and outputs beyond the provider cap", async () => {
+    for (const body of [{ input: "\0", expectedOutput: "" }, { input: "", expectedOutput: "\0" },
+        { input: "", expectedOutput: "a".repeat(65537) }]) {
+        for (const controller of [tests.createTestCase, tests.updateTestCase]) {
+            const res = response();
+            await controller(request({ body }), res);
             assert.equal(res.statusCode, 400);
         }
     }

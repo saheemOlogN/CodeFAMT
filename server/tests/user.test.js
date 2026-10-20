@@ -186,6 +186,7 @@ test("password changes reject invalid bodies and password lengths before queryin
     for (const body of [null, [], "password", {}, { currentPassword: {}, newPassword: "valid-password" },
         { currentPassword: "short", newPassword: "valid-password" },
         { currentPassword: "valid-password", newPassword: "short" },
+        { currentPassword: "valid-password", newPassword: "        " },
         { currentPassword: "a".repeat(73), newPassword: "valid-password" },
         { currentPassword: "valid-password", newPassword: "é".repeat(37) }]) {
         const res = response();

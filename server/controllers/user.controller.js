@@ -118,7 +118,8 @@ async function changePassword(req, res) {
 
         if (!body || typeof body !== "object" || Array.isArray(body) ||
             [body.currentPassword, body.newPassword].some(password =>
-                typeof password !== "string" || password.length < 8 || Buffer.byteLength(password, "utf8") > 72)) {
+                typeof password !== "string" || !password.trim() || password.length < 8 ||
+                Buffer.byteLength(password, "utf8") > 72)) {
             return res.status(400).json({ message: "Passwords must be at least 8 characters and at most 72 bytes" });
         }
 
@@ -142,6 +143,7 @@ async function changePassword(req, res) {
             return res.status(409).json({ message: "Your account changed. Log in and try again" });
         }
 
+        await require("../utils/realtime").disconnectUser(req.user._id);
         return res.status(200).json({ message: "Password changed. Log in again" });
     } catch {
         return res.status(500).json({ message: "Could not change password" });

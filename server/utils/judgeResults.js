@@ -65,7 +65,8 @@ function judgeResults(results, testCases, problem) {
             } else {
                 status = "runtime_error";
             }
-        } else if (result.stderr) {
+        } else if (result.truncated || (result.exitCode !== undefined && result.exitCode !== 0) ||
+            (result.stderr && result.exitCode !== 0)) {
             status = "runtime_error";
         } else if (!hasTime || !hasMemory) {
             status = "internal_error";

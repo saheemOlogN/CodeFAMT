@@ -4,49 +4,89 @@ const TestCase = require("../models/testCase.model");
 const Contest = require("../models/contest.model");
 const ContestParticipant = require("../models/contestParticipant.model");
 const Submission = require("../models/submission.model");
-const { executeCode, languages } = require("../utils/executeCode");
-const gradeSubmission = require("../utils/gradeSubmission");
+const CodeRun = require("../models/codeRun.model");
+const { languages } = require("../utils/executeCode");
+const executionQueue = require("../utils/executionQueue");
 
 const submissionFields = "user problem contest language status passedTests totalTests executionTimeMs memoryUsedMb judgedAt createdAt updatedAt";
-let activeExecutions = 0;
+
+function submissionResponse(submission) {
+    return {
+        _id: submission._id,
+        user: submission.user,
+        problem: submission.problem,
+        contest: submission.contest,
+        language: submission.language,
+        status: submission.status,
+        passedTests: submission.passedTests,
+        totalTests: submission.totalTests,
+        executionTimeMs: submission.executionTimeMs,
+        memoryUsedMb: submission.memoryUsedMb,
+        judgedAt: submission.judgedAt,
+        createdAt: submission.createdAt,
+        updatedAt: submission.updatedAt,
+    };
+}
 
 async function runCode(req, res) {
-    let acquired = false;
-
     try {
         const body = req.body || {};
         const { language, code, input = "" } = body;
 
         if (Array.isArray(body) || Object.keys(body).some((key) => !["language", "code", "input"].includes(key)) ||
             typeof language !== "string" || !Object.hasOwn(languages, language) ||
-            typeof code !== "string" || !code.trim() || Buffer.byteLength(code, "utf8") > 50000 ||
-            typeof input !== "string" || Buffer.byteLength(input, "utf8") > 100000) {
+            typeof code !== "string" || !code.trim() || code.includes("\0") || Buffer.byteLength(code, "utf8") > 50000 ||
+            typeof input !== "string" || input.includes("\0") || Buffer.byteLength(input, "utf8") > 100000) {
             return res.status(400).json({ message: "Send a supported language, code up to 50000 bytes and input up to 100000 bytes" });
         }
 
-        if (!process.env.ONECOMPILER_API_KEY) {
+        if (!process.env.ONLINECOMPILER_API_KEY) {
             return res.status(503).json({ message: "Code execution is not configured yet" });
         }
 
-        if (activeExecutions >= 4) {
-            return res.status(429).json({ message: "Code execution is busy. Try again shortly" });
+        const run = await CodeRun.create({
+            user: req.user._id,
+            language,
+            code,
+            input,
+            status: "queued",
+        });
+
+        try {
+            await executionQueue.enqueueRun(run);
+        } catch {
+            console.error("Code run saved and waiting for queue recovery");
         }
 
-        activeExecutions++;
-        acquired = true;
-        const results = await executeCode({ language, code, inputs: [input] });
-
-        return res.status(200).json({ result: results[0] });
+        return res.status(202).json({ run: { _id: run._id, status: run.status, language: run.language, createdAt: run.createdAt } });
     } catch {
-        return res.status(503).json({ message: "Code execution is unavailable. Try again later" });
-    } finally {
-        if (acquired) activeExecutions--;
+        return res.status(500).json({ message: "Could not save code run" });
+    }
+}
+
+async function getRun(req, res) {
+    try {
+        if (!mongoose.isObjectIdOrHexString(req.params.id)) {
+            return res.status(400).json({ message: "Invalid code run ID" });
+        }
+
+        const filter = { _id: req.params.id, expiresAt: { $gt: new Date() } };
+
+        if (req.user.role !== "admin") filter.user = req.user._id;
+
+        const run = await CodeRun.findOne(filter).select("user language status createdAt updatedAt +result +errorMessage");
+
+        if (!run) {
+            return res.status(404).json({ message: "Code run not found" });
+        }
+
+        return res.status(200).json({ run });
+    } catch {
+        return res.status(500).json({ message: "Could not load code run" });
     }
 }
 
 async function submitCode(req, res) {
-    let acquired = false;
-
     try {
         const body = req.body || {};
         const { problemId, contestId, language, code } = body;
@@ -55,11 +95,11 @@ async function submitCode(req, res) {
             !mongoose.isObjectIdOrHexString(problemId) ||
             (contestId !== undefined && !mongoose.isObjectIdOrHexString(contestId)) ||
             typeof language !== "string" || !Object.hasOwn(languages, language) ||
-            typeof code !== "string" || !code.trim() || Buffer.byteLength(code, "utf8") > 50000) {
+            typeof code !== "string" || !code.trim() || code.includes("\0") || Buffer.byteLength(code, "utf8") > 50000) {
             return res.status(400).json({ message: "Send a problem ID, optional contest ID, supported language and code up to 50000 bytes" });
         }
 
-        if (!process.env.ONECOMPILER_API_KEY) {
+        if (!process.env.ONLINECOMPILER_API_KEY) {
             return res.status(503).json({ message: "Code execution is not configured yet" });
         }
 
@@ -106,39 +146,30 @@ async function submitCode(req, res) {
             .lean();
 
         if (!testCases.length || testCases.length > 100 || testCases.some((testCase) =>
-            typeof testCase.input !== "string" || Buffer.byteLength(testCase.input, "utf8") > 100000 || typeof testCase.expectedOutput !== "string")) {
+            typeof testCase.input !== "string" || testCase.input.includes("\0") || Buffer.byteLength(testCase.input, "utf8") > 100000 || typeof testCase.expectedOutput !== "string" || testCase.expectedOutput.includes("\0") || Buffer.byteLength(testCase.expectedOutput, "utf8") > 65536)) {
             return res.status(503).json({ message: "This problem is not ready for judging" });
         }
 
-        if (activeExecutions >= 4) {
-            return res.status(429).json({ message: "Code execution is busy. Try again shortly" });
-        }
-
-        activeExecutions++;
-        acquired = true;
         const submission = await Submission.create({
             user: req.user._id,
             problem: problem._id,
             contest: contest?._id || null,
             language,
             code,
-            status: "running",
+            status: "queued",
+            queueVersion: 0,
             totalTests: testCases.length,
             createdAt: receivedAt,
         });
-        const result = await gradeSubmission(submission, problem, testCases);
+        try {
+            await executionQueue.enqueueSubmission(submission);
+        } catch {
+            console.error("Submission saved and waiting for queue recovery");
+        }
 
-        return res.status(201).json({ submission: result });
-    } catch (error) {
-        if (error.status === 503) {
-            return res.status(503).json({ message: "Judging is unavailable. Retry this submission later", submissionId: error.submissionId });
-        }
-        if (error.status === 409) {
-            return res.status(409).json({ message: "Submission changed. Reload its result" });
-        }
+        return res.status(202).json({ submission: submissionResponse(submission) });
+    } catch {
         return res.status(500).json({ message: "Could not submit code" });
-    } finally {
-        if (acquired) activeExecutions--;
     }
 }
 
@@ -201,14 +232,12 @@ async function getSubmission(req, res) {
 }
 
 async function retrySubmission(req, res) {
-    let acquired = false;
-
     try {
-        if (!mongoose.isObjectIdOrHexString(req.params.id) || Object.keys(req.body || {}).length) {
+        if (!mongoose.isObjectIdOrHexString(req.params.id) || Array.isArray(req.body) || Object.keys(req.body || {}).length) {
             return res.status(400).json({ message: "Use a valid submission ID and an empty request body" });
         }
 
-        if (!process.env.ONECOMPILER_API_KEY) {
+        if (!process.env.ONLINECOMPILER_API_KEY) {
             return res.status(503).json({ message: "Code execution is not configured yet" });
         }
 
@@ -254,28 +283,21 @@ async function retrySubmission(req, res) {
             .lean();
 
         if (!testCases.length || testCases.length > 100 || testCases.some((testCase) =>
-            typeof testCase.input !== "string" || Buffer.byteLength(testCase.input, "utf8") > 100000 || typeof testCase.expectedOutput !== "string")) {
+            typeof testCase.input !== "string" || testCase.input.includes("\0") || Buffer.byteLength(testCase.input, "utf8") > 100000 || typeof testCase.expectedOutput !== "string" || testCase.expectedOutput.includes("\0") || Buffer.byteLength(testCase.expectedOutput, "utf8") > 65536)) {
             return res.status(503).json({ message: "This problem is not ready for judging" });
         }
 
-        if (activeExecutions >= 4) {
-            return res.status(429).json({ message: "Code execution is busy. Try again shortly" });
-        }
-
-        activeExecutions++;
-        acquired = true;
         const claimed = await Submission.findOneAndUpdate(
-            { _id: submission._id, status: "internal_error" },
+            { _id: submission._id, status: "internal_error", queueVersion: submission.queueVersion },
             {
                 $set: {
-                    status: "running",
-                    passedTests: 0,
+                    status: "queued",
                     totalTests: testCases.length,
-                    executionTimeMs: null,
-                    memoryUsedMb: null,
                     errorMessage: "",
+                    processingToken: null,
                     judgedAt: null,
                 },
+                $inc: { queueVersion: 1 },
             },
             { new: true, runValidators: true }
         ).select("+code");
@@ -284,20 +306,16 @@ async function retrySubmission(req, res) {
             return res.status(409).json({ message: "Submission is already being retried or has been judged" });
         }
 
-        const result = await gradeSubmission(claimed, problem, testCases);
+        try {
+            await executionQueue.enqueueSubmission(claimed);
+        } catch {
+            console.error("Submission saved and waiting for queue recovery");
+        }
 
-        return res.status(200).json({ submission: result });
-    } catch (error) {
-        if (error.status === 503) {
-            return res.status(503).json({ message: "Judging is unavailable. Retry this submission later", submissionId: error.submissionId });
-        }
-        if (error.status === 409) {
-            return res.status(409).json({ message: "Submission changed. Reload its result" });
-        }
+        return res.status(202).json({ submission: submissionResponse(claimed) });
+    } catch {
         return res.status(500).json({ message: "Could not retry submission" });
-    } finally {
-        if (acquired) activeExecutions--;
     }
 }
 
-module.exports = { runCode, submitCode, getSubmissions, getSubmission, retrySubmission };
+module.exports = { runCode, getRun, submitCode, getSubmissions, getSubmission, retrySubmission };
