@@ -6,11 +6,13 @@ Plain CommonJS JavaScript. Express setup stays in index.js. Controllers use name
 
 Use Node.js 24. From the server folder, run `npm install`, then run `npm run dev` in one terminal and `npm run worker:dev` in another. For deployment use `npm start` and `npm run worker`. Both processes are required.
 
-The npm scripts load .env. Configure PORT, MONGODB_URI, JWT_SECRET, OTP_SECRET, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, ONLINECOMPILER_API_KEY CLIENT_ORIGIN and REDIS_URL. Hosted Redis normally provides a redis:// or rediss:// URL. Set REDIS_PREFIX=codefamt, JUDGE_CONCURRENCY=2 and COMPILER_RUNS_PER_MINUTE=30; adjust the latter two to your provider plan. Keep secrets in this ignored file.
+The npm scripts load .env. Configure PORT, MONGODB_URI, JWT_SECRET, OTP_SECRET, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, ONLINECOMPILER_API_KEY, CLIENT_ORIGIN and REDIS_URL. Hosted Redis normally provides a redis:// or rediss:// URL. Set REDIS_PREFIX=codefamt, JUDGE_CONCURRENCY=2 and COMPILER_RUNS_PER_MINUTE=30; adjust the latter two to your provider plan. Keep secrets in this ignored file.
 
 Use MongoDB Atlas or a replica set. An accepted submission and its solved-problem record are saved in a transaction so both changes succeed together. Standalone MongoDB does not support these transactions. See [MongoDB requirements](https://www.mongodb.com/docs/manual/core/transactions-production-consideration/) and [Mongoose transactions](https://mongoosejs.com/docs/transactions.html).
 
-API instances and workers must share MongoDB, REDIS_URL and REDIS_PREFIX. Redis shares execution concurrency, compiler request budgets, HTTP rate limits and socket broadcasts. MongoDB transactions serialize admin writes. Startup does not reset active submissions. A worker scans unfinished MongoDB records every 15 seconds to recover missing queue jobs. These paths still need a hosted-service integration check before deployment.
+API instances and workers must share MongoDB, REDIS_URL and REDIS_PREFIX. Redis shares execution concurrency, compiler request budgets, HTTP rate limits and socket broadcasts. MongoDB transactions serialize admin writes. Startup does not reset active submissions. A worker scans unfinished MongoDB records every 15 seconds to recover missing queue jobs.
+
+Set the Redis eviction policy to noeviction in your hosting dashboard. The configured instance reported volatile-lru during verification, which can evict queue state under memory pressure. See [BullMQ production settings](https://docs.bullmq.io/guide/going-to-production). Keep Redis persistence enabled where your hosting plan supports it.
 
 ## Understand the flow
 
@@ -99,6 +101,8 @@ Create with title, optional description, ISO startTime and endTime, and `problem
 
 Publish with `{ "status": "published" }` before its start. Every selected problem must have contest visibility and hidden tests. Weekly contests are scheduled by creating their dates; recurring generation is not implemented.
 
+A problem cannot be reused in another published contest because its earlier participants could already know the statement. Create fresh problems for each contest. Cancelled contests release their problems for publication elsewhere.
+
 Published settings cannot change. Cancellation is allowed before start. Upcoming contest endpoints hide problem IDs and statements from students. Joined students can read statements after start.
 
 Receipt time is recorded after reading the request body and before authentication. A submission must arrive at or after start and strictly before end. Judging may finish later. The client clock never decides eligibility.
@@ -151,6 +155,34 @@ Run `npm test` in the server folder.
 
 Tests cover controllers, authentication, password reset, worker retry/resume behavior, judging, localhost HTTP routes and concurrent Socket.IO clients. Database queries, email delivery and compiler calls are mocked in the default suite.
 
-To check the real queue, set RUN_QUEUE_INTEGRATION=1 for a command using node --env-file=.env --test tests/queue.integration.test.js. It requires MongoDB and Redis, creates an isolated temporary database and Redis queue, and checks 20 runs across two workers with a simulated compiler. It removes its database and queue afterward. This is not a provider load test.
+The live tests are opt-in and load the settings from .env. From PowerShell:
 
-Hosted queue integration, live MongoDB transactions, SMTP delivery and live OnlineCompiler.io execution still need verification with configured services before a college contest.
+```powershell
+$env:RUN_QUEUE_INTEGRATION="1"
+node --env-file=.env --test tests/queue.integration.test.js
+Remove-Item Env:RUN_QUEUE_INTEGRATION
+
+$env:RUN_BACKEND_INTEGRATION="1"
+node --env-file=.env --test tests/backend.integration.test.js
+Remove-Item Env:RUN_BACKEND_INTEGRATION
+
+$env:RUN_COMPILER_INTEGRATION="1"
+node --env-file=.env --test tests/compiler.integration.test.js
+Remove-Item Env:RUN_COMPILER_INTEGRATION
+```
+
+Queue and backend integration tests create isolated temporary databases and Redis namespaces, then remove only their own data. The backend and compiler tests consume a small number of real compiler executions. Email is captured inside the backend test rather than delivered.
+
+Verified on 20 October 2026:
+
+- 198 automated tests passed; the three live tests are skipped by default.
+- Hosted Redis and MongoDB: 20 queued runs completed across two workers, with combined concurrency limited to two.
+- Actual HTTP API: concurrent contest submissions executed through OnlineCompiler.io and reached accepted status. Duplicate accepted submissions counted only once in solved counts and leaderboard scores.
+- Socket.IO: private verdicts and leaderboard notifications reached clients connected to two API servers through hosted Redis. Logout disconnected the matching user's socket across servers.
+- Concurrent contest publication: two admins attempting to publish contests with the same problem produced one success and one conflict.
+- Registration, OTP verification and password reset passed using real MongoDB transactions and captured mail. Password reset revoked the previous login.
+- C, C++, Java, Python and JavaScript each produced the expected output with valid time and memory metrics. Invalid Python syntax produced compilation_error.
+- SMTP authentication succeeded without sending email. Actual inbox delivery remains to be checked.
+- Dependency audit reported zero known vulnerabilities.
+
+These are functional and limited concurrency checks, not a full college-wide capacity benchmark. Before hosting a contest, verify inbox delivery, set Redis to noeviction, deploy the API and worker, and test the expected student load against your compiler plan. Frontend clients must refetch state and rejoin contest rooms after reconnecting.

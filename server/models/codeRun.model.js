@@ -58,6 +58,6 @@ const codeRunSchema = new mongoose.Schema(
 );
 
 codeRunSchema.index({ user: 1, createdAt: -1 });
-codeRunSchema.index({ status: 1, createdAt: 1 });
+codeRunSchema.index({ status: 1, _id: 1 });
 
 module.exports = mongoose.model("CodeRun", codeRunSchema);

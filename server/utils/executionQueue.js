@@ -24,8 +24,12 @@ function getQueue() {
 
 async function initializeQueue() {
     const concurrency = Number(process.env.JUDGE_CONCURRENCY || 2);
+    const requests = Number(process.env.COMPILER_RUNS_PER_MINUTE || 30);
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 16) {
         throw new Error("JUDGE_CONCURRENCY must be between 1 and 16");
+    }
+    if (!Number.isSafeInteger(requests) || requests < 1) {
+        throw new Error("COMPILER_RUNS_PER_MINUTE must be a positive integer");
     }
     await getQueue().waitUntilReady();
     await getQueue().setGlobalConcurrency(concurrency);

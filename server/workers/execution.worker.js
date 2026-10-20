@@ -19,7 +19,7 @@ async function processExecution(job, token) {
     const record = await Model.findOneAndUpdate(
         { _id: job.data.id, queueVersion: job.data.version, status: { $in: ["queued", "running"] } },
         { $set: { status: "running", processingToken: claim } },
-        { new: true }
+        { returnDocument: "after" }
     ).select("+code +input +judgeProgress +processingToken");
     if (!record) return;
     const filter = { _id: record._id, queueVersion: job.data.version, processingToken: claim, status: "running" };
@@ -27,11 +27,16 @@ async function processExecution(job, token) {
     try {
         if (job.name === "submission") {
             const problem = await Problem.findById(record.problem);
-            const tests = await TestCase.find({ problem: record.problem }).select("+input +expectedOutput").sort({ _id: 1 });
+            const tests = await TestCase.find({ problem: record.problem }).select("+input +expectedOutput").sort({ _id: 1 }).limit(101);
             const progress = record.judgeProgress;
             if (!problem || !tests.length || tests.length > 100 || tests.length !== record.totalTests ||
+                tests.some(item => typeof item.input !== "string" || item.input.includes("\0") ||
+                    Buffer.byteLength(item.input, "utf8") > 100000 || typeof item.expectedOutput !== "string" ||
+                    item.expectedOutput.includes("\0") || Buffer.byteLength(item.expectedOutput, "utf8") > 65536) ||
                 (progress && (!Number.isInteger(progress.nextTest) || progress.nextTest < 0 ||
-                    progress.nextTest > tests.length || progress.passedTests !== progress.nextTest))) {
+                    progress.nextTest > tests.length || progress.passedTests !== progress.nextTest ||
+                    !Number.isFinite(progress.executionTimeMs) || progress.executionTimeMs < 0 ||
+                    !Number.isFinite(progress.memoryUsedMb) || progress.memoryUsedMb < 0))) {
                 throw new UnrecoverableError("Submission test data is invalid");
             }
             await gradeSubmission(record, problem, tests);
@@ -40,7 +45,7 @@ async function processExecution(job, token) {
             const results = await execution.executeCode({ language: record.language, code: record.code, inputs: [record.input] });
             const saved = await Model.findOneAndUpdate(filter, {
                 $set: { status: "completed", result: results[0], processingToken: null },
-            }, { new: true });
+            }, { returnDocument: "after" });
             await publish(saved);
         }
     } catch (error) {
@@ -50,7 +55,7 @@ async function processExecution(job, token) {
         const saved = await Model.findOneAndUpdate(filter, {
             $set: { status: final ? "internal_error" : "queued", processingToken: null,
                 errorMessage: final ? "Code execution is unavailable. Try again later" : "" },
-        }, { new: true });
+        }, { returnDocument: "after" });
         await publish(saved);
         if (error.delayMs) {
             await job.moveToDelayed(Date.now() + error.delayMs, token);
@@ -79,7 +84,7 @@ async function recoverPendingJobs() {
                     const saved = await Model.findOneAndUpdate(
                         { _id: record._id, queueVersion: record.queueVersion, status: { $in: ["queued", "running"] } },
                         { $set: { status: "internal_error", processingToken: null, errorMessage: "Execution interrupted. Try again later" } },
-                        { new: true }
+                        { returnDocument: "after" }
                     );
                     await publish(saved);
                 }

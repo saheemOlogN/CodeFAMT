@@ -186,7 +186,7 @@ test("verification consumes its exact OTP and activates the account in one trans
         assert.deepEqual(update.$set, {
             name: "Student", department: "it", year: "2nd", passwordHash: "new-password-hash", isVerified: true,
         });
-        assert.deepEqual(options, { new: true, runValidators: true, session });
+        assert.deepEqual(options, { returnDocument: "after", runValidators: true, session });
         return user({ isVerified: true });
     });
     const res = response();

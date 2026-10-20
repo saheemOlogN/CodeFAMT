@@ -107,7 +107,7 @@ async function resetPassword(req, res) {
         const otpRecord = await PasswordReset.findOneAndUpdate(
             { user: user._id, expiresAt: { $gt: new Date() }, attempts: { $lt: 5 } },
             { $inc: { attempts: 1 } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("+otpHash");
 
         if (!otpRecord) {

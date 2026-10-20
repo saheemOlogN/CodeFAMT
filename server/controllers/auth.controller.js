@@ -94,7 +94,7 @@ async function verifyOtp(req, res) {
         const otpRecord = await Otp.findOneAndUpdate(
             { user: user._id, expiresAt: { $gt: new Date() }, attempts: { $lt: 5 } },
             { $inc: { attempts: 1 } },
-            { new: true }
+            { returnDocument: "after" }
         ).select("+otpHash");
 
         if (!otpRecord) {
@@ -144,7 +144,7 @@ async function verifyOtp(req, res) {
                         isVerified: true,
                     },
                 },
-                { new: true, runValidators: true, session }
+                { returnDocument: "after", runValidators: true, session }
             );
 
             if (!verifiedUser) {

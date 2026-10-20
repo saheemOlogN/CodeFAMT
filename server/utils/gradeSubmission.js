@@ -66,7 +66,7 @@ async function gradeSubmission(submission, problem, testCases) {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             await mongoose.connection.transaction(async session => {
-                saved = await Submission.findOneAndUpdate(filter, { $set: result }, { new: true, runValidators: true, session });
+                saved = await Submission.findOneAndUpdate(filter, { $set: result }, { returnDocument: "after", runValidators: true, session });
                 if (!saved) {
                     const error = new Error("Submission claim changed");
                     error.stale = true;

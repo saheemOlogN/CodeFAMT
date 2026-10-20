@@ -232,7 +232,7 @@ test("unknown account and unavailable reset code have the same failure", async t
         assert.ok(filter.expiresAt.$gt instanceof Date);
         assert.deepEqual(filter.attempts, { $lt: 5 });
         assert.deepEqual(update, { $inc: { attempts: 1 } });
-        assert.deepEqual(options, { new: true });
+        assert.deepEqual(options, { returnDocument: "after" });
         return query(null);
     });
     const missing = response();

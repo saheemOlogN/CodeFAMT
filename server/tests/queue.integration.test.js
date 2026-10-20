@@ -12,11 +12,11 @@ const { createWorker, recoverPendingJobs } = require("../workers/execution.worke
 
 test("real MongoDB and Redis recover queued runs and share concurrency across two workers", {
     skip: process.env.RUN_QUEUE_INTEGRATION !== "1",
-    timeout: 60000,
+    timeout: 120000,
 }, async t => {
     assert.ok(process.env.REDIS_URL, "Set REDIS_URL before running this integration test");
     assert.ok(process.env.MONGODB_URI, "Set MONGODB_URI before running this integration test");
-    const namespace = `codefamt_test_${randomUUID().replaceAll("-", "")}`;
+    const namespace = `cf_test_${randomUUID().replaceAll("-", "").slice(0, 24)}`;
     process.env.REDIS_PREFIX = namespace;
     process.env.JUDGE_CONCURRENCY = "2";
     process.env.COMPILER_RUNS_PER_MINUTE = "100";
@@ -24,6 +24,7 @@ test("real MongoDB and Redis recover queued runs and share concurrency across tw
     let active = 0;
     let maximum = 0;
     let executions = 0;
+    let queueReady = false;
     t.mock.method(execution, "executeCode", async ({ inputs }) => {
         active++;
         maximum = Math.max(maximum, active);
@@ -37,6 +38,7 @@ test("real MongoDB and Redis recover queued runs and share concurrency across tw
         await mongoose.connect(process.env.MONGODB_URI, { dbName: namespace, serverSelectionTimeoutMS: 10000 });
         await Promise.all([CodeRun.init(), Submission.init()]);
         await queue.initializeQueue();
+        queueReady = true;
         const runs = await CodeRun.create(Array.from({ length: 20 }, (_, index) => ({
             user: new mongoose.Types.ObjectId(), language: "python", code: "print(input())", input: String(index),
         })));
@@ -52,11 +54,14 @@ test("real MongoDB and Redis recover queued runs and share concurrency across tw
         const completed = await CodeRun.find().select("+result");
         assert.equal(new Set(completed.map(run => run.result.stdout)).size, 20);
     } finally {
-        await Promise.all(workers.map(worker => worker.close()));
-        if (mongoose.connection.name === namespace) await mongoose.connection.dropDatabase();
-        if (queue.getQueue().opts.prefix === namespace) await queue.getQueue().obliterate({ force: true });
-        await queue.closeQueue();
-        closeRedis();
-        await mongoose.disconnect();
+        try {
+            await Promise.all(workers.map(worker => worker.close()));
+            if (mongoose.connection.name === namespace) await mongoose.connection.dropDatabase();
+            if (queueReady && queue.getQueue().opts.prefix === namespace) await queue.getQueue().obliterate({ force: true });
+        } finally {
+            await queue.closeQueue();
+            await closeRedis();
+            await mongoose.disconnect();
+        }
     }
 });

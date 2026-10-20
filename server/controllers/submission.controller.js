@@ -299,7 +299,7 @@ async function retrySubmission(req, res) {
                 },
                 $inc: { queueVersion: 1 },
             },
-            { new: true, runValidators: true }
+            { returnDocument: "after", runValidators: true }
         ).select("+code");
 
         if (!claimed) {
