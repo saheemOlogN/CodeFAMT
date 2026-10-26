@@ -1,3 +1,4 @@
+require("node:test").beforeEach(t => { if (!process.env.RUN_LEADERBOARD_INTEGRATION) t.mock.method(Contest, "distinct", async () => []); });
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const Problem = require("../models/problem.model");
@@ -49,7 +50,7 @@ test("students cannot use any problem or test mutation or inspect hidden tests",
 
 test("student lists enforce public visibility even when draft is requested", async (t) => {
     t.mock.method(Problem, "find", (filter) => {
-        assert.deepEqual(filter, { visibility: "public" });
+        assert.deepEqual(filter, { $or: [{ visibility: "public" }, { visibility: "contest", _id: { $in: [] } }] });
         const result = query([]);
         result.select = (fields) => {
             assert.equal(fields.includes("statement"), false);
@@ -59,7 +60,7 @@ test("student lists enforce public visibility even when draft is requested", asy
         return result;
     });
     t.mock.method(Problem, "countDocuments", async (filter) => {
-        assert.equal(filter.visibility, "public");
+        assert.equal(filter.$or[0].visibility, "public");
         return 0;
     });
     const res = response();
@@ -69,7 +70,7 @@ test("student lists enforce public visibility even when draft is requested", asy
 
 test("student detail lookup cannot fetch a draft or contest problem", async (t) => {
     t.mock.method(Problem, "findOne", (filter) => {
-        assert.deepEqual(filter, { _id: problemId, visibility: "public" });
+        assert.deepEqual(filter, { _id: problemId, $or: [{ visibility: "public" }, { visibility: "contest", _id: { $in: [] } }] });
         const result = query(null);
         result.select = (fields) => {
             assert.equal(fields.includes("statement"), true);
@@ -125,7 +126,7 @@ test("create validates the schema and assigns the authenticated creator", async 
 
 test("publishing a problem without hidden tests fails", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "find", () => query([]));
     const res = response();
     await problems.updateProblem(request({ body: { visibility: "public" } }), res);
@@ -135,8 +136,8 @@ test("publishing a problem without hidden tests fails", async (t) => {
 test("publishing accepts a valid empty-input and empty-output test", async (t) => {
     editable(t);
     let saved = false;
-    t.mock.method(Problem, "findById", async () => ({
-        _id: problemId, visibility: "draft", save: async () => { saved = true; },
+    mockProblem(t, async () => ({
+        _id: problemId, visibility: "draft", dsa: [{ language: "cpp", starter: "int f(){}", prefix: "", suffix: "int main(){}" }], save: async () => { saved = true; },
     }));
     t.mock.method(TestCase, "find", () => query([{ input: "", expectedOutput: "" }]));
     const res = response();
@@ -146,7 +147,7 @@ test("publishing accepts a valid empty-input and empty-output test", async (t) =
 });
 
 test("published and cancelled contest references freeze problem updates", async (t) => {
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(Contest, "exists", async (filter) => {
         assert.deepEqual(filter, { "problems.problem": problemId, status: { $ne: "draft" } });
         return { _id: testId };
@@ -157,7 +158,7 @@ test("published and cancelled contest references freeze problem updates", async 
 });
 
 test("any submission freezes problem updates", async (t) => {
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(Contest, "exists", async () => null);
     t.mock.method(Submission, "exists", async () => ({ _id: testId }));
     const res = response();
@@ -166,7 +167,7 @@ test("any submission freezes problem updates", async (t) => {
 });
 
 test("problem deletion rejects even draft contest references", async (t) => {
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(Contest, "exists", async (filter) => {
         assert.deepEqual(filter, { "problems.problem": problemId });
         return { _id: testId };
@@ -178,7 +179,7 @@ test("problem deletion rejects even draft contest references", async (t) => {
 
 test("problem deletion cannot leave orphan test cases", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "exists", async () => ({ _id: testId }));
     const res = response();
     await problems.deleteProblem(request(), res);
@@ -195,7 +196,7 @@ test("test creation rejects non-string values, oversized data and forged ownersh
 });
 
 test("a missing problem cannot receive a test case", async (t) => {
-    t.mock.method(Problem, "findById", async () => null);
+    mockProblem(t, async () => null);
     const res = response();
     await tests.createTestCase(request({ body: { input: "", expectedOutput: "" } }), res);
     assert.equal(res.statusCode, 404);
@@ -203,7 +204,7 @@ test("a missing problem cannot receive a test case", async (t) => {
 
 test("test creation accepts explicit empty strings", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "countDocuments", async () => 0);
     t.mock.method(TestCase, "create", async (value) => {
         assert.deepEqual(value, { problem: problemId, input: "", expectedOutput: "" });
@@ -216,7 +217,7 @@ test("test creation accepts explicit empty strings", async (t) => {
 
 test("test count is capped before execution batches become unbounded", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "countDocuments", async () => 100);
     const res = response();
     await tests.createTestCase(request({ body: { input: "", expectedOutput: "" } }), res);
@@ -241,7 +242,7 @@ test("test listing explicitly retrieves hidden fields only after admin authoriza
 });
 
 test("a test cannot be updated through another problem's URL", async (t) => {
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "findOne", (filter) => {
         assert.deepEqual(filter, { _id: testId, problem: problemId });
         return query(null);
@@ -252,7 +253,7 @@ test("a test cannot be updated through another problem's URL", async (t) => {
 });
 
 test("submissions freeze hidden test updates", async (t) => {
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "findOne", () => query({ _id: testId }));
     t.mock.method(Contest, "exists", async () => null);
     t.mock.method(Submission, "exists", async () => ({ _id: testId }));
@@ -263,7 +264,7 @@ test("submissions freeze hidden test updates", async (t) => {
 
 test("the last test of a published problem cannot be removed", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "public" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "public" }));
     t.mock.method(TestCase, "findOne", () => query({ _id: testId }));
     t.mock.method(TestCase, "countDocuments", async () => 1);
     const res = response();
@@ -273,7 +274,7 @@ test("the last test of a published problem cannot be removed", async (t) => {
 
 test("draft contest test cases stay editable until publication", async t => {
     let deleted = false;
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     t.mock.method(TestCase, "findOne", () => query({
         _id: testId,
         deleteOne: async () => { deleted = true; },
@@ -292,7 +293,7 @@ test("draft contest test cases stay editable until publication", async t => {
 });
 
 test("database failures do not expose internal messages", async (t) => {
-    t.mock.method(Problem, "findById", async () => { throw new Error("private database connection details"); });
+    mockProblem(t, async () => { throw new Error("private database connection details"); });
     const res = response();
     await problems.deleteProblem(request(), res);
     assert.equal(res.statusCode, 500);
@@ -301,7 +302,7 @@ test("database failures do not expose internal messages", async (t) => {
 
 test("publication freezes the definition even before the first submission", async (t) => {
     for (const visibility of ["public", "contest"]) {
-        t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility }));
+        mockProblem(t, async () => ({ _id: problemId, visibility }));
         for (const controller of [problems.updateProblem, tests.createTestCase, tests.updateTestCase, tests.deleteTestCase]) {
             const res = response();
             const body = controller === problems.updateProblem ? { title: "Changed" } : { input: "", expectedOutput: "" };
@@ -334,7 +335,7 @@ test("hidden tests reject NUL characters and outputs beyond the provider cap", a
 
 test("publication rejects oversized or excessive legacy test cases", async (t) => {
     editable(t);
-    t.mock.method(Problem, "findById", async () => ({ _id: problemId, visibility: "draft" }));
+    mockProblem(t, async () => ({ _id: problemId, visibility: "draft" }));
     for (const records of [Array.from({ length: 101 }, () => ({ input: "", expectedOutput: "" })),
         [{ input: "é".repeat(50001), expectedOutput: "" }], [{ input: "", expectedOutput: "é".repeat(50001) }]]) {
         t.mock.method(TestCase, "find", () => query(records));
@@ -343,3 +344,5 @@ test("publication rejects oversized or excessive legacy test cases", async (t) =
         assert.equal(res.statusCode, 400);
     }
 });
+
+function mockProblem(t, fn) { t.mock.method(Problem, "findById", (...args) => query(Promise.resolve().then(() => fn(...args)))); }

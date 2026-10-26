@@ -20,7 +20,7 @@ async function processExecution(job, token) {
         { _id: job.data.id, queueVersion: job.data.version, status: { $in: ["queued", "running"] } },
         { $set: { status: "running", processingToken: claim } },
         { returnDocument: "after" }
-    ).select("+code +input +judgeProgress +processingToken");
+    ).select("+code +executionCode +input +judgeProgress +processingToken");
     if (!record) return;
     const filter = { _id: record._id, queueVersion: job.data.version, processingToken: claim, status: "running" };
     await publish(record);
@@ -42,7 +42,7 @@ async function processExecution(job, token) {
             await gradeSubmission(record, problem, tests);
         } else {
             await providerLimit.reserveProviderRun();
-            const results = await execution.executeCode({ language: record.language, code: record.code, inputs: [record.input] });
+            const results = await execution.executeCode({ language: record.language, code: record.executionCode || record.code, inputs: [record.input] });
             const saved = await Model.findOneAndUpdate(filter, {
                 $set: { status: "completed", result: results[0], processingToken: null },
             }, { returnDocument: "after" });

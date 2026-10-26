@@ -25,7 +25,7 @@ async function gradeSubmission(submission, problem, testCases) {
         await providerLimit.reserveProviderRun();
         const results = await execution.executeCode({
             language: submission.language,
-            code: submission.code,
+            code: submission.executionCode || submission.code,
             inputs: [testCases[index].input],
         });
         verdict = judgeResults(results, [testCases[index]], problem);

@@ -11,6 +11,8 @@ const codeRunSchema = new mongoose.Schema(
             type: String,
             required: true,
         },
+        mode: { type: String, enum: ["cp", "dsa"], default: "cp" },
+        executionCode: { type: String, select: false },
         code: {
             type: String,
             required: true,

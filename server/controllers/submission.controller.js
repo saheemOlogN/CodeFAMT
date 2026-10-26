@@ -1,3 +1,5 @@
+const { canPractice } = require('../utils/practiceAccess');
+const { buildExecutionCode } = require("../utils/solutionMode");
 const mongoose = require("mongoose");
 const Problem = require("../models/problem.model");
 const TestCase = require("../models/testCase.model");
@@ -8,7 +10,7 @@ const CodeRun = require("../models/codeRun.model");
 const { languages } = require("../utils/executeCode");
 const executionQueue = require("../utils/executionQueue");
 
-const submissionFields = "user problem contest language status passedTests totalTests executionTimeMs memoryUsedMb judgedAt createdAt updatedAt";
+const submissionFields = "user problem contest language mode status passedTests totalTests executionTimeMs memoryUsedMb judgedAt createdAt updatedAt";
 
 function submissionResponse(submission) {
     return {
@@ -17,6 +19,7 @@ function submissionResponse(submission) {
         problem: submission.problem,
         contest: submission.contest,
         language: submission.language,
+        mode: submission.mode || "cp",
         status: submission.status,
         passedTests: submission.passedTests,
         totalTests: submission.totalTests,
@@ -31,9 +34,10 @@ function submissionResponse(submission) {
 async function runCode(req, res) {
     try {
         const body = req.body || {};
-        const { language, code, input = "" } = body;
+        const { language, code, input = "", mode = "dsa", problemId, contestId } = body;
 
-        if (Array.isArray(body) || Object.keys(body).some((key) => !["language", "code", "input"].includes(key)) ||
+        if (Array.isArray(body) || Object.keys(body).some((key) => !["language", "code", "input", "mode", "problemId", "contestId"].includes(key)) ||
+            mode !== "dsa" ||
             typeof language !== "string" || !Object.hasOwn(languages, language) ||
             typeof code !== "string" || !code.trim() || code.includes("\0") || Buffer.byteLength(code, "utf8") > 50000 ||
             typeof input !== "string" || input.includes("\0") || Buffer.byteLength(input, "utf8") > 100000) {
@@ -44,10 +48,32 @@ async function runCode(req, res) {
             return res.status(503).json({ message: "Code execution is not configured yet" });
         }
 
+        let executionCode;
+        if (mode === "dsa") {
+            if (!mongoose.isObjectIdOrHexString(problemId) || (contestId !== undefined && !mongoose.isObjectIdOrHexString(contestId))) {
+                return res.status(400).json({ message: "DSA runs require a valid problem ID and optional contest ID" });
+            }
+            const problem = await Problem.findById(problemId).select("+dsa");
+            if (!problem) return res.status(404).json({ message: "Problem not found" });
+            if (contestId !== undefined) {
+                const contest = await Contest.findById(contestId);
+                if (!contest || !contest.problems.some(entry => String(entry.problem) === String(problem._id))) return res.status(404).json({ message: "Contest problem not found" });
+                if (req.user.role !== "admin" && (contest.status !== "published" || new Date() < contest.startTime ||
+                    !await ContestParticipant.exists({ contest: contest._id, user: req.user._id }))) return res.status(403).json({ message: "Join an opened contest to run its solutions" });
+            } else if (!await canPractice(problem) && req.user.role !== "admin") {
+                return res.status(404).json({ message: "Problem not found" });
+            }
+            executionCode = buildExecutionCode(problem, mode, language, code);
+        } else if (problemId !== undefined || contestId !== undefined) {
+            return res.status(400).json({ message: "CP runs accept only language, code, input and mode" });
+        }
+
         const run = await CodeRun.create({
             user: req.user._id,
             language,
             code,
+            mode,
+            executionCode,
             input,
             status: "queued",
         });
@@ -58,8 +84,9 @@ async function runCode(req, res) {
             console.error("Code run saved and waiting for queue recovery");
         }
 
-        return res.status(202).json({ run: { _id: run._id, status: run.status, language: run.language, createdAt: run.createdAt } });
-    } catch {
+        return res.status(202).json({ run: { _id: run._id, status: run.status, language: run.language, mode: run.mode || "cp", createdAt: run.createdAt } });
+    } catch (error) {
+        if (error.status === 400) return res.status(400).json({ message: error.message });
         return res.status(500).json({ message: "Could not save code run" });
     }
 }
@@ -74,7 +101,7 @@ async function getRun(req, res) {
 
         if (req.user.role !== "admin") filter.user = req.user._id;
 
-        const run = await CodeRun.findOne(filter).select("user language status createdAt updatedAt +result +errorMessage");
+        const run = await CodeRun.findOne(filter).select("user language mode status createdAt updatedAt +result +errorMessage");
 
         if (!run) {
             return res.status(404).json({ message: "Code run not found" });
@@ -89,11 +116,12 @@ async function getRun(req, res) {
 async function submitCode(req, res) {
     try {
         const body = req.body || {};
-        const { problemId, contestId, language, code } = body;
+        const { problemId, contestId, language, code, mode = "dsa" } = body;
 
-        if (Array.isArray(body) || Object.keys(body).some((key) => !["problemId", "contestId", "language", "code"].includes(key)) ||
+        if (Array.isArray(body) || Object.keys(body).some((key) => !["problemId", "contestId", "language", "code", "mode"].includes(key)) ||
             !mongoose.isObjectIdOrHexString(problemId) ||
             (contestId !== undefined && !mongoose.isObjectIdOrHexString(contestId)) ||
+            mode !== "dsa" ||
             typeof language !== "string" || !Object.hasOwn(languages, language) ||
             typeof code !== "string" || !code.trim() || code.includes("\0") || Buffer.byteLength(code, "utf8") > 50000) {
             return res.status(400).json({ message: "Send a problem ID, optional contest ID, supported language and code up to 50000 bytes" });
@@ -109,7 +137,7 @@ async function submitCode(req, res) {
             return res.status(500).json({ message: "Submission receipt time is unavailable" });
         }
 
-        const problem = await Problem.findById(problemId);
+        const problem = mode === "dsa" ? await Problem.findById(problemId).select("+dsa") : await Problem.findById(problemId);
 
         if (!problem) {
             return res.status(404).json({ message: "Problem not found" });
@@ -135,7 +163,7 @@ async function submitCode(req, res) {
             if (!await ContestParticipant.exists({ contest: contest._id, user: req.user._id, createdAt: { $lte: receivedAt } })) {
                 return res.status(403).json({ message: "Join this contest before submitting" });
             }
-        } else if (problem.visibility !== "public") {
+        } else if (!await canPractice(problem)) {
             return res.status(404).json({ message: "Problem not found" });
         }
 
@@ -150,12 +178,15 @@ async function submitCode(req, res) {
             return res.status(503).json({ message: "This problem is not ready for judging" });
         }
 
+        const executionCode = mode === "dsa" ? buildExecutionCode(problem, mode, language, code) : undefined;
         const submission = await Submission.create({
             user: req.user._id,
             problem: problem._id,
             contest: contest?._id || null,
             language,
             code,
+            mode,
+            executionCode,
             status: "queued",
             queueVersion: 0,
             totalTests: testCases.length,
@@ -168,7 +199,8 @@ async function submitCode(req, res) {
         }
 
         return res.status(202).json({ submission: submissionResponse(submission) });
-    } catch {
+    } catch (error) {
+        if (error.status === 400) return res.status(400).json({ message: error.message });
         return res.status(500).json({ message: "Could not submit code" });
     }
 }
@@ -272,7 +304,7 @@ async function retrySubmission(req, res) {
             if (!await ContestParticipant.exists({ contest: submission.contest, user: submission.user, createdAt: { $lte: submission.createdAt } })) {
                 return res.status(403).json({ message: "The original submission has no eligible contest registration" });
             }
-        } else if (problem.visibility !== "public") {
+        } else if (!await canPractice(problem)) {
             return res.status(404).json({ message: "Problem not found" });
         }
 

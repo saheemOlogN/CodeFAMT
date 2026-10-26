@@ -32,6 +32,10 @@ async function initializeQueue() {
         throw new Error("COMPILER_RUNS_PER_MINUTE must be a positive integer");
     }
     await getQueue().waitUntilReady();
+    if (process.env.NODE_ENV === 'production') {
+        const info = await connection.info('memory');
+        if (!/^maxmemory_policy:noeviction\r?$/m.test(info)) throw new Error('Judge Redis must use the noeviction policy');
+    }
     await getQueue().setGlobalConcurrency(concurrency);
 }
 

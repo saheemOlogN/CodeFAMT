@@ -3,6 +3,28 @@ const Problem = require("../models/problem.model");
 const TestCase = require("../models/testCase.model");
 const Contest = require("../models/contest.model");
 const Submission = require("../models/submission.model");
+const { validateTestImport } = require('../utils/testImport');
+
+async function importTestCases(req, res) {
+    try {
+        if (req.user.role !== 'admin') return res.status(403).json({ message: 'Admin access required' });
+        if (!mongoose.isObjectIdOrHexString(req.params.problemId)) return res.status(400).json({ message: 'Invalid problem ID' });
+        const error = validateTestImport(req.body);
+        if (error) return res.status(400).json({ message: error });
+        const problem = await Problem.findById(req.params.problemId);
+        if (!problem) return res.status(404).json({ message: 'Problem not found' });
+        if (problem.visibility !== 'draft' || await Contest.exists({ 'problems.problem': problem._id, status: { $ne: 'draft' } }) || await Submission.exists({ problem: problem._id })) {
+            return res.status(409).json({ message: 'Tests are locked once a problem is published or used.' });
+        }
+        const count = await TestCase.countDocuments({ problem: problem._id });
+        if (count + req.body.testCases.length > 100) return res.status(400).json({ message: `There are already ${count} tests. A problem allows at most 100.` });
+        // The route's adminWrite transaction makes this import all-or-nothing.
+        for (const test of req.body.testCases) await TestCase.create({ problem: problem._id, input: test.input, expectedOutput: test.expectedOutput });
+        return res.status(201).json({ imported: req.body.testCases.length, total: count + req.body.testCases.length });
+    } catch {
+        return res.status(500).json({ message: 'Could not import test cases. No tests were imported.' });
+    }
+}
 
 async function createTestCase(req, res) {
     try {
@@ -181,4 +203,4 @@ async function deleteTestCase(req, res) {
     }
 }
 
-module.exports = { createTestCase, getTestCases, updateTestCase, deleteTestCase };
+module.exports = { createTestCase, getTestCases, updateTestCase, deleteTestCase, importTestCases };

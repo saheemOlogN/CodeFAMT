@@ -71,7 +71,7 @@ function providerResult(fields = {}) {
 
 function setup(results = [providerResult()]) {
     const state = {
-        problem: { _id: problemId, visibility: "public", timeLimitMs: 1000, memoryLimitMb: 128 },
+        problem: { _id: problemId, dsa: [{ language: "python", starter: "def solve(): pass", prefix: "", suffix: "solve()" }], visibility: "public", timeLimitMs: 1000, memoryLimitMb: 128 },
         tests: [{ input: "hidden input", expectedOutput: "expected" }],
         submission: null,
         solves: [],
@@ -85,7 +85,8 @@ function setup(results = [providerResult()]) {
     mock(CodeRun, "create", async fields => ({ _id: submissionId, ...fields }));
     mock(require("../utils/providerLimit"), "reserveProviderRun", async () => {});
     mock(require("../utils/realtime"), "publishSubmission", async () => {});
-    mock(Problem, "findById", async () => state.problem);
+    mock(Problem, "findById", () => query(state.problem));
+    mock(Contest, "exists", async () => null);
     mock(TestCase, "find", () => {
         state.testLoads++;
         return query(state.tests);
@@ -143,7 +144,7 @@ function setup(results = [providerResult()]) {
 test("custom runs return queued IDs without executing code in the request", async () => {
     const state = setup();
     const res = response();
-    await controller.runCode(request({ language: "python", code: "print(input())", input: "custom" }), res);
+    await controller.runCode(request({ problemId: String(problemId), language: "python", code: "def solve(): print(input())", input: "custom" }), res);
     assert.equal(res.statusCode, 202);
     assert.equal(res.body.run.status, "queued");
     assert.equal(state.executions, 0);
@@ -153,7 +154,7 @@ test("custom runs return queued IDs without executing code in the request", asyn
 test("run rejects hidden test selectors, unsupported languages and oversized UTF-8 code", async () => {
     const state = setup();
     for (const body of [
-        { ...submissionBody() },
+        { ...submissionBody(), testCases: [] },
         { language: "constructor", code: "x" },
         { language: "python", code: "é".repeat(25001) },
         { language: "python", code: "x", input: "é".repeat(50001) },

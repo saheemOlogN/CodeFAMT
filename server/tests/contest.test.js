@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { test, afterEach } = require("node:test");
+const { test, afterEach, beforeEach } = require("node:test");
 const mongoose = require("mongoose");
 const Contest = require("../models/contest.model");
 const ContestParticipant = require("../models/contestParticipant.model");
@@ -35,6 +35,8 @@ function query(value) {
         then(resolve, reject) { return Promise.resolve(value).then(resolve, reject); },
     };
 }
+
+beforeEach(() => mock(TestCase, 'find', () => query([{ input: '1', expectedOutput: '1' }])));
 
 function request(body = {}) {
     return {
@@ -151,7 +153,7 @@ test("publishing rejects empty contests and problems without tests", async () =>
 
     record = contest();
     mock(Problem, "countDocuments", async (filter) => {
-        assert.equal(filter.visibility, "contest");
+        assert.deepEqual(filter.visibility, { $in: ["draft", "contest"] });
         return 1;
     });
     mock(TestCase, "distinct", async () => []);
@@ -356,4 +358,23 @@ test("pagination rejects unbounded requests", async () => {
     const res = response();
     await controller.getLeaderboard(req, res);
     assert.equal(res.statusCode, 400);
+});
+
+beforeEach(() => {
+    mock(Problem, 'find', () => query([{ _id: problemId, dsa: [{ language: 'cpp', starter: 'int f(){}', prefix: '', suffix: 'int main(){}' }] }]));
+    mock(Problem, 'updateMany', async () => ({ modifiedCount: 1 }));
+});
+
+
+test('publication rejects malformed or oversized test collections before locking problems', async () => {
+    mock(Problem, 'countDocuments', async () => 1);
+    mock(TestCase, 'distinct', async () => [problemId]);
+    for (const tests of [Array(101).fill({ input: '', expectedOutput: '' }), [{ input: 'x\0', expectedOutput: 'x' }], [{ input: 'x', expectedOutput: 'x'.repeat(65537) }]]) {
+        mock(Contest, 'findById', () => query(contest()));
+        mock(TestCase, 'find', () => query(tests));
+        const res = response();
+        await controller.updateContest(request({ status: 'published' }), res);
+        assert.equal(res.statusCode, 400);
+        assert.match(res.body.message, /valid test cases/);
+    }
 });

@@ -1,13 +1,14 @@
 {
   "name": "server",
   "version": "1.0.0",
-  "description": "CODEFAMT college coding platform API",
+  "description": "CodeFAMT college coding platform API",
   "main": "index.js",
   "scripts": {
-    "start": "node --env-file=.env index.js",
-    "dev": "node --watch --env-file=.env index.js",
-    "worker": "node --env-file=.env worker.js",
-    "worker:dev": "node --watch --env-file=.env worker.js",
+    "start": "node --require=./config/compileCache.js --env-file-if-exists=.env index.js",
+    "dev": "node dev.js",
+    "dev:api": "node --watch --require=./config/compileCache.js --env-file=.env index.js",
+    "worker": "node --require=./config/compileCache.js --env-file-if-exists=.env worker.js",
+    "worker:dev": "node --watch --require=./config/compileCache.js --env-file=.env worker.js",
     "test": "node --test"
   },
   "keywords": [],
@@ -32,5 +33,8 @@
   },
   "devDependencies": {
     "socket.io-client": "^4.8.4"
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

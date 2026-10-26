@@ -1,10 +1,12 @@
+const { practiceFilter } = require('../utils/practiceAccess');
+const { validDsa, publicProblem } = require("../utils/solutionMode");
 const mongoose = require("mongoose");
 const Problem = require("../models/problem.model");
 const TestCase = require("../models/testCase.model");
 const Contest = require("../models/contest.model");
 const Submission = require("../models/submission.model");
 
-const fields = ["title", "slug", "statement", "difficulty", "tags", "inputFormat", "outputFormat", "constraints", "examples", "timeLimitMs", "memoryLimitMb", "visibility"];
+const fields = ["dsa", "title", "slug", "statement", "difficulty", "tags", "inputFormat", "outputFormat", "constraints", "examples", "timeLimitMs", "memoryLimitMb", "visibility"];
 const publicFields = "title slug statement difficulty tags inputFormat outputFormat constraints examples timeLimitMs memoryLimitMb visibility createdAt updatedAt";
 
 async function createProblem(req, res) {
@@ -14,6 +16,7 @@ async function createProblem(req, res) {
         }
 
         const body = req.body || {};
+        if (body.dsa !== undefined && !validDsa(body.dsa)) return res.status(400).json({ message: "Provide unique DSA languages with starter, prefix and suffix (up to 20000 bytes each)" });
 
         if (Array.isArray(body) || Object.keys(body).some((field) => !fields.includes(field))) {
             return res.status(400).json({ message: "Send only problem fields" });
@@ -60,7 +63,9 @@ async function getProblems(req, res) {
         const filter = {};
 
         if (req.user.role !== "admin") {
-            filter.visibility = "public";
+            Object.assign(filter, await practiceFilter());
+        } else if (visibility === "public") {
+            Object.assign(filter, await practiceFilter());
         } else if (visibility !== undefined) {
             filter.visibility = visibility;
         }
@@ -95,15 +100,15 @@ async function getProblem(req, res) {
 
         const filter = { _id: req.params.id };
 
-        if (req.user.role !== "admin") filter.visibility = "public";
+        if (req.user.role !== "admin") Object.assign(filter, await practiceFilter());
 
-        const problem = await Problem.findOne(filter).select(publicFields);
+        const problem = await Problem.findOne(filter).select(`${publicFields} +dsa`);
 
         if (!problem) {
             return res.status(404).json({ message: "Problem not found" });
         }
 
-        return res.status(200).json({ problem });
+        return res.status(200).json({ problem: req.user.role === "admin" ? problem : publicProblem(problem) });
     } catch {
         return res.status(500).json({ message: "Could not get problem" });
     }
@@ -120,18 +125,26 @@ async function updateProblem(req, res) {
         }
 
         const body = req.body || {};
+        if (body.dsa !== undefined && !validDsa(body.dsa)) return res.status(400).json({ message: "Provide unique DSA languages with starter, prefix and suffix (up to 20000 bytes each)" });
 
         if (Array.isArray(body) || !Object.keys(body).length || Object.keys(body).some((field) => !fields.includes(field))) {
             return res.status(400).json({ message: "Send the problem fields to update" });
         }
 
-        const problem = await Problem.findById(req.params.id);
+        const problem = await Problem.findById(req.params.id).select("+dsa");
 
         if (!problem) {
             return res.status(404).json({ message: "Problem not found" });
         }
 
         if (problem.visibility !== "draft") {
+            // Existing full-program problems can receive their first function driver.
+            // Queued legacy submissions retain their saved source/snapshot.
+            if (!problem.dsa?.length && Object.keys(body).length === 1 && body.dsa?.length && validDsa(body.dsa)) {
+                problem.dsa = body.dsa;
+                await problem.save();
+                return res.json({ problem, message: 'Function templates configured' });
+            }
             return res.status(409).json({ message: "Published problems cannot be changed" });
         }
 
@@ -147,6 +160,7 @@ async function updateProblem(req, res) {
         }
 
         if (problem.visibility !== "draft") {
+            if (!problem.dsa?.length || !validDsa(problem.dsa.map(item => item.toObject ? item.toObject() : item))) return res.status(400).json({ message: "Configure at least one function template and hidden driver before publishing" });
             const tests = await TestCase.find({ problem: problem._id }).select("+input +expectedOutput").limit(101);
 
             if (!tests.length || tests.length > 100 || tests.some((test) => typeof test.input !== "string" ||

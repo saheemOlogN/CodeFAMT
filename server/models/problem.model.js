@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 
 const problemSchema = new mongoose.Schema(
     {
+        dsa: {
+            type: [new mongoose.Schema({ language: String, starter: String, prefix: String, suffix: String }, { _id: false })],
+            default: [],
+            select: false,
+        },
         title: {
             type: String,
             required: true,

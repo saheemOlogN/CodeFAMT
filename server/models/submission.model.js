@@ -23,6 +23,8 @@ const submissionSchema = new mongoose.Schema(
             trim: true,
             lowercase: true,
         },
+        mode: { type: String, enum: ["cp", "dsa"], default: "cp" },
+        executionCode: { type: String, select: false },
         code: {
             type: String,
             required: true,

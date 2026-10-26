@@ -84,11 +84,16 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
         });
         assert.equal(created.status, 201);
         const problemId = created.body.problem._id;
-        const added = await request(bases[0], `/api/problems/${problemId}/tests`, tokens[0], "POST", {
-            input: "2 3", expectedOutput: "5",
+        const added = await request(bases[0], `/api/problems/${problemId}/tests/import`, tokens[0], "POST", {
+            testCases: [{ input: "2 3", expectedOutput: "5" }],
         });
         assert.equal(added.status, 201);
-        assert.equal((await request(bases[0], `/api/problems/${problemId}`, tokens[0], "PATCH", { visibility: "contest" })).status, 200);
+        const dsa = [{ language: "cpp", starter: "class Solution { public: int add(int a, int b) { return 0; } };",
+            prefix: "#include <bits/stdc++.h>\nusing namespace std;",
+            suffix: "int main() { int a, b; cin >> a >> b; cout << Solution().add(a,b); }" }];
+        assert.equal((await request(bases[0], `/api/problems/${problemId}`, tokens[0], "PATCH", { dsa })).status, 200);
+        const adminProblem = await request(bases[0], `/api/problems/${problemId}`, tokens[0]);
+        assert.equal(adminProblem.body.problem.dsa[0].prefix, dsa[0].prefix);
         const startTime = new Date(Date.now() + 20000);
         const contestBody = { title: "Integration contest", startTime, endTime: new Date(startTime.getTime() + 60000),
             problems: [{ problem: problemId, points: 100 }] };
@@ -115,9 +120,11 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
         }
         workers.push(createWorker(), createWorker());
         await new Promise(resolve => setTimeout(resolve, Math.max(0, startTime.getTime() - Date.now() + 20)));
-        const code = "a, b = map(int, input().split())\nprint(a + b)";
-        const submitted = await Promise.all([0, 0, 1].map(index => request(bases[index], "/api/submissions", tokens[index + 1],
-            "POST", { problemId, contestId, language: "python", code })));
+        const dsaCode = "class Solution { public: int add(int a, int b) { return a + b; } };";
+        const studentProblem = await request(bases[0], `/api/contests/${contestId}/problems/${problemId}`, tokens[1]);
+        assert.deepEqual(studentProblem.body.problem.dsa, [{ language: "cpp", starter: dsa[0].starter }]);
+        const submitted = await Promise.all([0, 0, 1].map((index) => request(bases[index], "/api/submissions", tokens[index + 1],
+            "POST", { problemId, contestId, language: "cpp", mode: "dsa", code: dsaCode })));
         assert.ok(submitted.every(result => result.status === 202));
         for (let index = 0; index < submitted.length; index++) {
             const owner = index === 2 ? 1 : 0;
@@ -128,6 +135,8 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
             });
             assert.equal(final.status, "accepted");
             assert.equal(final.passedTests, 1);
+            assert.equal(final.mode, "dsa");
+            assert.equal(final.executionCode, undefined);
             assert.equal((await request(bases[1 - owner], `/api/submissions/${id}`, tokens[2 - owner])).status, 404);
         }
         await waitFor(() => ownerEvents[0].filter(event => event.status === "accepted").length === 2 &&
@@ -138,7 +147,7 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
         assert.equal(board.status, 200);
         assert.equal(board.body.leaderboard.length, 2);
         assert.ok(board.body.leaderboard.every(row => row.score === 100 && row.solvedCount === 1));
-        const run = await request(bases[0], "/api/submissions/run", tokens[1], "POST", { language: "python", code, input: "7 8" });
+        const run = await request(bases[0], "/api/submissions/run", tokens[1], "POST", { problemId, contestId, mode: "dsa", language: "cpp", code: dsaCode, input: "7 8" });
         assert.equal(run.status, 202);
         const runResult = await waitFor(async () => {
             const result = await request(bases[0], `/api/submissions/runs/${run.body.run._id}`, tokens[1]);
@@ -146,9 +155,39 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
         });
         assert.equal(runResult.result.stdout.trim(), "15");
         assert.equal((await request(bases[1], `/api/submissions/runs/${run.body.run._id}`, tokens[2])).status, 404);
+        const dsaRun = await request(bases[0], "/api/submissions/run", tokens[1], "POST", { problemId, contestId, mode: "dsa", language: "cpp", code: dsaCode, input: "8 9" });
+        assert.equal(dsaRun.status, 202);
+        const dsaResult = await waitFor(async () => {
+            const result = await request(bases[0], `/api/submissions/runs/${dsaRun.body.run._id}`, tokens[1]);
+            return result.body.run.status === "completed" && result.body.run;
+        });
+        assert.equal(dsaResult.result.stdout.trim(), "17");
+        assert.equal(dsaResult.mode, "dsa");
+        assert.equal(dsaResult.executionCode, undefined);
         assert.equal((await request(bases[1], "/api/auth/logout", tokens[1], "POST", {})).status, 200);
         await waitFor(() => !sockets[0].connected);
         assert.equal(sockets[1].connected, true);
+        assert.equal((await request(bases[0], `/api/problems/${problemId}`, tokens[2])).status, 404);
+        const Contest = require('../models/contest.model');
+        await Contest.updateOne({ _id: contestId }, { $set: { endTime: new Date(Date.now() - 1) } });
+        assert.equal((await request(bases[0], `/api/problems/${problemId}`, tokens[2])).status, 200);
+        const library = await request(bases[0], '/api/problems?visibility=public', tokens[2]);
+        assert.ok(library.body.problems.some(item => item._id === problemId));
+        const roadmap = { title: 'Course roadmap', description: 'Start here', sheetUrl: 'https://example.com/sheet', steps: [{ title: 'Arrays', description: 'Practice indexing', resourceUrl: '' }] };
+        assert.equal((await request(bases[0], '/api/roadmap', tokens[0], 'PUT', roadmap)).status, 200);
+        assert.equal((await request(bases[0], '/api/roadmap', tokens[2])).body.roadmap.title, roadmap.title);
+        assert.equal((await request(bases[0], '/api/roadmap', tokens[2], 'PUT', roadmap)).status, 403);
+        const savedRoadmap = (await request(bases[0], '/api/roadmap', tokens[2])).body.roadmap;
+        const stepId = savedRoadmap.steps[0].id;
+        assert.equal((await request(bases[0], '/api/roadmap/progress', tokens[2], 'PATCH', { stepId, completed: true })).status, 200);
+        assert.deepEqual((await request(bases[1], '/api/roadmap', tokens[2])).body.completed, [stepId]);
+        assert.deepEqual((await request(bases[1], '/api/roadmap', tokens[0])).body.completed, []);
+        await request(bases[0], '/api/roadmap', tokens[0], 'PUT', { ...roadmap, steps: [{ ...savedRoadmap.steps[0], title: 'Updated arrays' }] });
+        assert.deepEqual((await request(bases[1], '/api/roadmap', tokens[2])).body.completed, [stepId]);
+        assert.equal((await request(bases[0], '/api/roadmap/progress', tokens[2], 'PATCH', { stepId, completed: false })).status, 200);
+        assert.deepEqual((await request(bases[1], '/api/roadmap', tokens[2])).body.completed, []);
+
+
         let mail;
         t.mock.method(require("nodemailer"), "createTransport", () => ({
             async sendMail(message) { mail = message; },
@@ -173,7 +212,7 @@ test("live HTTP contest, compiler, transactions, Redis workers and cross-server 
         assert.equal((await request(bases[1], "/api/users/me", login.body.token)).status, 401);
         assert.equal((await request(bases[0], "/api/auth/login", null, "POST", { email: registration.email, password })).status, 401);
         assert.equal((await request(bases[0], "/api/auth/login", null, "POST", { email: registration.email, password: newPassword })).status, 200);
-        t.diagnostic("Real compiler: three accepted contest submissions and one custom run. Duplicate solves counted once; private verdicts and leaderboard updates reached both API servers.");
+        t.diagnostic("Real compiler: three accepted function-only contest submissions and two function-only custom runs. Duplicate solves counted once; private verdicts and leaderboard updates reached both API servers.");
         t.diagnostic("Registration, OTP verification and password reset passed with real MongoDB transactions and captured mail; no emails were sent.");
     } finally {
         sockets.forEach(socket => socket.disconnect());

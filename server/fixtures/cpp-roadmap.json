@@ -1,0 +1,115 @@
+{
+  "title": "C++ DSA roadmap",
+  "description": "A practical path from C++ fundamentals to contest-ready problem solving. Use Striver’s A2Z sheet for exercises alongside these CodeFAMT learning checkpoints. Mark each topic complete at your own pace.",
+  "sheetUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet",
+  "steps": [
+    {
+      "id": "cpp-foundations",
+      "title": "C++ foundations",
+      "description": "Write functions, use references, and understand types, loops and input/output. Practise small arithmetic and string exercises.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "complexity",
+      "title": "Time and space complexity",
+      "description": "Estimate loop costs, compare growth rates and recognise when a solution will exceed the constraints.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "stl",
+      "title": "STL essentials",
+      "description": "Practise vector, string, pair, set, map, unordered_map, stack, queue and priority_queue. Learn iterators and custom sorting.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "math",
+      "title": "Basic maths and recursion",
+      "description": "Implement gcd, prime checks and digit operations. Trace recursive calls and define reliable base cases.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "sorting",
+      "title": "Sorting",
+      "description": "Implement selection, insertion, merge and quick sort. Explain stability and choose an appropriate algorithm.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "arrays",
+      "title": "Arrays and prefix sums",
+      "description": "Work through traversal, rotation, frequency counting and prefix sums. Include empty, negative and duplicate cases.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "search",
+      "title": "Binary search",
+      "description": "Search sorted data, find boundaries and apply binary search to a monotonic answer space.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "strings",
+      "title": "Strings and hashing",
+      "description": "Practise palindrome checks, character frequencies and anagrams. Understand how hashing speeds up lookups.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "two-pointers",
+      "title": "Two pointers and sliding windows",
+      "description": "Build fixed and variable windows. State the condition that lets a pointer move without missing an answer.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "linked-lists",
+      "title": "Linked lists",
+      "description": "Reverse a list, find its middle and detect cycles. Draw pointer changes before coding them.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "stack-queue",
+      "title": "Stacks and queues",
+      "description": "Solve balanced brackets and next-greater-element tasks. Learn monotonic stacks and queue-based processing.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "backtracking",
+      "title": "Recursion and backtracking",
+      "description": "Generate subsets and permutations. Track the decision, recursive call and undo step; avoid duplicate answers.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "bits",
+      "title": "Bit manipulation",
+      "description": "Use masks, shifts and XOR. Practise testing and setting bits and counting set bits.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "greedy-heaps",
+      "title": "Greedy algorithms and heaps",
+      "description": "Explain why each greedy choice is safe. Use heaps for top-k values and scheduling.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "trees",
+      "title": "Trees and binary search trees",
+      "description": "Write DFS and BFS traversals. Practise height, diameter, paths and BST search and validation.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "graphs",
+      "title": "Graphs",
+      "description": "Build adjacency lists. Practise components, cycle detection, topological ordering, shortest paths and disjoint sets.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "dp",
+      "title": "Dynamic programming",
+      "description": "Define state, transition and base cases. Progress from one-dimensional recurrence to grid, subsequence and knapsack problems.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    },
+    {
+      "id": "tries",
+      "title": "Tries and revision",
+      "description": "Build a prefix trie, then revisit weak topics. Complete timed mixed sets and review failed approaches before attempting contests.",
+      "resourceUrl": "https://takeuforward.org/prep-hub/strivers-a2z-dsa-sheet"
+    }
+  ]
+}

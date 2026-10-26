@@ -31,9 +31,10 @@ function token() {
     return jwt.sign({ version: user.tokenVersion }, process.env.JWT_SECRET, { subject: userId, expiresIn: "1h" });
 }
 
-async function request(path, { method = "GET", body, auth, raw } = {}) {
+async function request(path, { method = "GET", body, auth, raw, cookie } = {}) {
     const headers = { "Content-Type": "application/json", Origin: process.env.CLIENT_ORIGIN };
     if (auth) headers.Authorization = `Bearer ${auth}`;
+    if (cookie) headers.Cookie = cookie;
     const response = await fetch(`${base}${path}`, {
         method,
         headers,
@@ -58,6 +59,7 @@ test.after(async () => {
 });
 
 test.beforeEach((t) => {
+    t.mock.method(require("../models/contest.model"), "distinct", async () => []);
     user = { _id: userId, name: "Student", email: "student@famt.ac.in", department: "it", year: "2nd",
         role: "student", isVerified: true, tokenVersion: 0, passwordHash: "private-hash" };
     t.mock.method(User, "findById", () => query(user));
@@ -65,8 +67,8 @@ test.beforeEach((t) => {
 
 test("every protected route rejects unauthenticated requests", async () => {
     const routes = [
-        ["GET", "/api/users/me"], ["PATCH", "/api/users/me"], ["GET", "/api/users/me/solved"],
-        ["PATCH", "/api/users/me/password"], ["POST", "/api/auth/logout"],
+        ["GET", "/api/roadmap"], ["PATCH", "/api/roadmap/progress"], ["PUT", "/api/roadmap"], ["POST", `/api/problems/${problemId}/tests/import`], ["GET", "/api/users/me/stats"], ["GET", "/api/users/me"], ["PATCH", "/api/users/me"], ["GET", "/api/users/me/solved"], ["GET", "/api/users/me/activity"],
+        ["PATCH", "/api/users/me/password"], ["GET", "/api/users/leaderboard"], ["POST", "/api/auth/logout"],
         ["GET", "/api/problems"], ["POST", "/api/problems"],
         ["GET", `/api/problems/${problemId}/tests`], ["POST", `/api/problems/${problemId}/tests`],
         ["PATCH", `/api/problems/${problemId}/tests/${problemId}`], ["DELETE", `/api/problems/${problemId}/tests/${problemId}`],
@@ -87,6 +89,7 @@ test("every protected route rejects unauthenticated requests", async () => {
 test("students cannot reach admin problem, hidden test or contest endpoints", async () => {
     const auth = token();
     for (const [method, path] of [
+        ["PUT", "/api/roadmap"], ["POST", `/api/problems/${problemId}/tests/import`],
         ["POST", "/api/problems"], ["PATCH", `/api/problems/${problemId}`], ["DELETE", `/api/problems/${problemId}`],
         ["GET", `/api/problems/${problemId}/tests`], ["POST", `/api/problems/${problemId}/tests`],
         ["PATCH", `/api/problems/${problemId}/tests/${problemId}`], ["DELETE", `/api/problems/${problemId}/tests/${problemId}`],
@@ -108,6 +111,19 @@ test("profile route returns the authenticated profile and configured browser ori
     assert.equal(response.body.user.passwordHash, undefined);
     assert.equal(response.body.user.tokenVersion, undefined);
     assert.equal(response.headers.get("access-control-allow-origin"), process.env.CLIENT_ORIGIN);
+});
+
+test("authenticated students can request the college leaderboard without private profile fields", async t => {
+    t.mock.method(User, "aggregate", async () => [{ rows: [{
+        _id: userId, name: "Student", department: "it", year: "2nd", rank: 1,
+        solvedCount: 0, easyCount: 0, mediumCount: 0, hardCount: 0, lastSolvedAt: null,
+        email: user.email, passwordHash: user.passwordHash,
+    }], count: [{ total: 1 }] }]);
+    const response = await request("/api/users/leaderboard?department=it&year=2nd", { auth: token() });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.leaderboard[0].user, { id: userId, name: "Student", department: "it", year: "2nd" });
+    assert.equal(response.body.total, 1);
+    assert.equal((await request("/api/users/leaderboard?year=5th", { auth: token() })).status, 400);
 });
 
 test("an admin can read hidden tests through the nested route", async (t) => {
@@ -137,9 +153,18 @@ test("login issues a usable token and logout invalidates it", async (t) => {
     assert.equal(login.status, 200);
     assert.equal(login.body.user.passwordHash, undefined);
     const auth = login.body.token;
+    const setCookie = login.headers.get("set-cookie");
+    assert.match(setCookie, /Max-Age=2592000/);
+    assert.match(setCookie, /HttpOnly/);
+    assert.match(setCookie, /SameSite=Lax/);
+    const cookie = setCookie.split(";")[0];
+    assert.equal((await request("/api/users/me", { cookie })).status, 200);
     assert.equal((await request("/api/users/me", { auth })).status, 200);
-    assert.equal((await request("/api/auth/logout", { method: "POST", auth })).status, 200);
+    const logout = await request("/api/auth/logout", { method: "POST", cookie });
+    assert.equal(logout.status, 200);
+    assert.match(logout.headers.get("set-cookie"), /Expires=Thu, 01 Jan 1970/);
     assert.equal((await request("/api/users/me", { auth })).status, 401);
+    assert.equal((await request("/api/users/me", { cookie })).status, 401);
 });
 
 test("JSON parsing rejects malformed and oversized bodies safely", async () => {

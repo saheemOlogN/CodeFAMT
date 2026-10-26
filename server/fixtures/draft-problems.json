@@ -1,0 +1,149 @@
+[
+  {
+    "title": "Sum of Array",
+    "slug": "sum-of-array",
+    "difficulty": "easy",
+    "statement": "Return the sum of all values in nums. Implement Solution::arraySum; the hidden driver handles input and output.",
+    "tags": [
+      "arrays"
+    ],
+    "inputFormat": "First line: n. Second line: n space-separated integers.",
+    "outputFormat": "Print the returned integer.",
+    "constraints": "1 <= n <= 100000; -1000000000 <= nums[i] <= 1000000000",
+    "examples": [
+      {
+        "input": "5\n1 2 3 4 5\n",
+        "output": "15",
+        "explanation": "The function returns 15."
+      }
+    ],
+    "timeLimitMs": 2000,
+    "memoryLimitMb": 256,
+    "visibility": "draft",
+    "dsa": [
+      {
+        "language": "cpp",
+        "prefix": "#include <bits/stdc++.h>\nusing namespace std;",
+        "starter": "class Solution {\npublic:\n    long long arraySum(vector<int>& nums) {\n        // Write your solution here.\n        return 0;\n    }\n};",
+        "suffix": "int main() {\n    int n; cin >> n;\n    vector<int> nums(n);\n    for (int &x : nums) cin >> x;\n    cout << Solution().arraySum(nums) << \"\\n\";\n}"
+      }
+    ],
+    "testCases": [
+      {
+        "input": "5\n1 2 3 4 5\n",
+        "expectedOutput": "15"
+      },
+      {
+        "input": "1\n-7\n",
+        "expectedOutput": "-7"
+      },
+      {
+        "input": "4\n-2 0 2 0\n",
+        "expectedOutput": "0"
+      },
+      {
+        "input": "3\n1000000000 1000000000 1000000000\n",
+        "expectedOutput": "3000000000"
+      }
+    ],
+    "referenceSolution": "class Solution { public: long long arraySum(vector<int>& nums) { return accumulate(nums.begin(), nums.end(), 0LL); } };"
+  },
+  {
+    "title": "Largest Element",
+    "slug": "largest-element",
+    "difficulty": "easy",
+    "statement": "Return the largest value in the non-empty array nums. Implement Solution::largestElement.",
+    "tags": [
+      "arrays"
+    ],
+    "inputFormat": "First line: n. Second line: n space-separated integers.",
+    "outputFormat": "Print the returned integer.",
+    "constraints": "1 <= n <= 100000; -1000000000 <= nums[i] <= 1000000000",
+    "examples": [
+      {
+        "input": "5\n3 1 9 2 4\n",
+        "output": "9",
+        "explanation": "The function returns 9."
+      }
+    ],
+    "timeLimitMs": 2000,
+    "memoryLimitMb": 256,
+    "visibility": "draft",
+    "dsa": [
+      {
+        "language": "cpp",
+        "prefix": "#include <bits/stdc++.h>\nusing namespace std;",
+        "starter": "class Solution {\npublic:\n    int largestElement(vector<int>& nums) {\n        // Write your solution here.\n        return 0;\n    }\n};",
+        "suffix": "int main() {\n    int n; cin >> n;\n    vector<int> nums(n);\n    for (int &x : nums) cin >> x;\n    cout << Solution().largestElement(nums) << \"\\n\";\n}"
+      }
+    ],
+    "testCases": [
+      {
+        "input": "5\n3 1 9 2 4\n",
+        "expectedOutput": "9"
+      },
+      {
+        "input": "3\n-8 -2 -5\n",
+        "expectedOutput": "-2"
+      },
+      {
+        "input": "1\n0\n",
+        "expectedOutput": "0"
+      },
+      {
+        "input": "4\n7 7 7 7\n",
+        "expectedOutput": "7"
+      }
+    ],
+    "referenceSolution": "class Solution { public: int largestElement(vector<int>& nums) { return *max_element(nums.begin(), nums.end()); } };"
+  },
+  {
+    "title": "First Occurrence",
+    "slug": "first-occurrence",
+    "difficulty": "medium",
+    "statement": "Given a sorted array nums and target, return the first zero-based index of target, or -1 if absent. Use O(log n) time. Implement Solution::firstOccurrence.",
+    "tags": [
+      "binary-search"
+    ],
+    "inputFormat": "First line: n. Second line: n space-separated integers. Third line: target.",
+    "outputFormat": "Print the returned integer.",
+    "constraints": "1 <= n <= 100000; nums is sorted; -1000000000 <= nums[i], target <= 1000000000",
+    "examples": [
+      {
+        "input": "6\n1 2 2 2 5 8\n2\n",
+        "output": "1",
+        "explanation": "The function returns 1."
+      }
+    ],
+    "timeLimitMs": 2000,
+    "memoryLimitMb": 256,
+    "visibility": "draft",
+    "dsa": [
+      {
+        "language": "cpp",
+        "prefix": "#include <bits/stdc++.h>\nusing namespace std;",
+        "starter": "class Solution {\npublic:\n    int firstOccurrence(vector<int>& nums, int target) {\n        // Write your solution here.\n        return -1;\n    }\n};",
+        "suffix": "int main() {\n    int n; cin >> n;\n    vector<int> nums(n);\n    for (int &x : nums) cin >> x;\n    int target; cin >> target;\n    cout << Solution().firstOccurrence(nums, target) << \"\\n\";\n}"
+      }
+    ],
+    "testCases": [
+      {
+        "input": "6\n1 2 2 2 5 8\n2\n",
+        "expectedOutput": "1"
+      },
+      {
+        "input": "3\n1 3 5\n4\n",
+        "expectedOutput": "-1"
+      },
+      {
+        "input": "1\n7\n7\n",
+        "expectedOutput": "0"
+      },
+      {
+        "input": "4\n-3 -3 0 1\n-3\n",
+        "expectedOutput": "0"
+      }
+    ],
+    "referenceSolution": "class Solution { public: int firstOccurrence(vector<int>& nums, int target) { auto it = lower_bound(nums.begin(), nums.end(), target); return it != nums.end() && *it == target ? int(it - nums.begin()) : -1; } };"
+  }
+]

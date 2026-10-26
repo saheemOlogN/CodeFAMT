@@ -1,3 +1,4 @@
+const { publicProblem, validDsa } = require("../utils/solutionMode");
 const mongoose = require("mongoose");
 const Contest = require("../models/contest.model");
 const ContestParticipant = require("../models/contestParticipant.model");
@@ -155,18 +156,32 @@ async function updateContest(req, res) {
             const filter = { _id: { $in: problemIds } };
 
             if (contest.status === "published") {
-                filter.visibility = "contest";
+                filter.visibility = { $in: ["draft", "contest"] };
             }
 
             if (problemIds.length && await Problem.countDocuments(filter) !== problemIds.length) {
-                return res.status(400).json({ message: "Problems must exist. Publishing requires every problem to have contest visibility" });
+                return res.status(400).json({ message: "Problems must exist and be unpublished contest drafts; public practice problems cannot be used in a new contest" });
             }
 
             if (contest.status === "published") {
+                const configured = await Problem.find({ _id: { $in: problemIds } }).select('+dsa');
+                if (configured.some(problem => !problem.dsa?.length || !validDsa(problem.dsa.map(item => item.toObject ? item.toObject() : item)))) {
+                    return res.status(400).json({ message: 'Every problem needs a function template and hidden driver before publishing the contest' });
+                }
                 const testedProblems = await TestCase.distinct("problem", { problem: { $in: problemIds } });
 
                 if (testedProblems.length !== problemIds.length) {
                     return res.status(400).json({ message: "Add at least one test case to every contest problem before publishing" });
+                }
+
+                for (const problem of configured) {
+                    const tests = await TestCase.find({ problem: problem._id }).select('+input +expectedOutput').limit(101);
+                    if (!tests.length || tests.length > 100 || tests.some(test =>
+                        typeof test.input !== 'string' || typeof test.expectedOutput !== 'string' ||
+                        test.input.includes('\0') || test.expectedOutput.includes('\0') ||
+                        Buffer.byteLength(test.input) > 100000 || Buffer.byteLength(test.expectedOutput) > 65536)) {
+                        return res.status(400).json({ message: 'Every contest problem needs 1 to 100 valid test cases before publication' });
+                    }
                 }
 
                 if (await Contest.exists({
@@ -183,6 +198,9 @@ async function updateContest(req, res) {
             }
         }
 
+        if (originalStatus === 'draft' && contest.status === 'published') {
+            await Problem.updateMany({ _id: { $in: contest.problems.map(entry => entry.problem) }, visibility: 'draft' }, { $set: { visibility: 'contest' } });
+        }
         contest.$where = { status: originalStatus, updatedAt: originalUpdatedAt };
         await contest.save();
 
@@ -293,7 +311,7 @@ async function getContestProblem(req, res) {
         }
 
         const problem = await Problem.findById(entry.problem)
-            .select("title slug statement difficulty tags inputFormat outputFormat constraints examples timeLimitMs memoryLimitMb")
+            .select("title slug statement difficulty tags inputFormat outputFormat constraints examples timeLimitMs memoryLimitMb +dsa")
             .lean();
 
         if (!problem) {
@@ -301,7 +319,7 @@ async function getContestProblem(req, res) {
         }
 
         return res.status(200).json({
-            problem,
+            problem: publicProblem(problem),
             points: entry.points,
             startTime: contest.startTime,
             endTime: contest.endTime,

@@ -1,6 +1,6 @@
 const express = require("express");
 const { createProblem, getProblems, getProblem, updateProblem, deleteProblem } = require("../controllers/problem.controller");
-const { createTestCase, getTestCases, updateTestCase, deleteTestCase } = require("../controllers/testCase.controller");
+const { createTestCase, getTestCases, updateTestCase, deleteTestCase, importTestCases } = require("../controllers/testCase.controller");
 const requireAuth = require("../middleware/auth.middleware");
 const { requireAdmin, adminWrite } = require("../middleware/admin.middleware");
 
@@ -11,6 +11,7 @@ router.get("/", getProblems);
 router.post("/", requireAdmin, adminWrite(createProblem));
 router.get("/:problemId/tests", requireAdmin, getTestCases);
 router.post("/:problemId/tests", requireAdmin, adminWrite(createTestCase));
+router.post("/:problemId/tests/import", requireAdmin, adminWrite(importTestCases));
 router.patch("/:problemId/tests/:id", requireAdmin, adminWrite(updateTestCase));
 router.delete("/:problemId/tests/:id", requireAdmin, adminWrite(deleteTestCase));
 router.get("/:id", getProblem);
