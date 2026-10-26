@@ -58,8 +58,8 @@ async function sendOtp(user) {
         await transporter.sendMail({
             from: process.env.SMTP_FROM,
             to: user.email,
-            subject: "CODEFAMT email verification",
-            text: `Your CODEFAMT verification code is ${otp}. It expires in 5 minutes. If you did not request this, ignore this email.`,
+            subject: "CodeFAMT email verification",
+            text: `Your CodeFAMT verification code is ${otp}. It expires in 5 minutes. If you did not request this, ignore this email.`,
         });
     } catch {
         const error = new Error("Could not send OTP. Try again after 60 seconds");

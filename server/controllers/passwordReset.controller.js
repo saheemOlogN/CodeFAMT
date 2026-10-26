@@ -66,8 +66,8 @@ async function forgotPassword(req, res) {
             await transporter.sendMail({
                 from: process.env.SMTP_FROM,
                 to: user.email,
-                subject: "CODEFAMT password reset",
-                text: `Your CODEFAMT password reset code is ${otp}. It expires in 5 minutes. If you did not request this, ignore this email.`,
+                subject: "CodeFAMT password reset",
+                text: `Your CodeFAMT password reset code is ${otp}. It expires in 5 minutes. If you did not request this, ignore this email.`,
             });
         } catch {
             console.error("Password reset email delivery failed");

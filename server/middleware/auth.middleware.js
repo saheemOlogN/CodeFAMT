@@ -1,12 +1,17 @@
 const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/user.model");
+const { readCookie, allowedOrigin } = require("../utils/sessionCookie");
 
 async function requireAuth(req, res, next) {
     const authorization = req.headers.authorization;
+    const cookieToken = authorization === undefined ? readCookie(req.headers.cookie) : "";
 
-    if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")) {
+    if (!cookieToken && (typeof authorization !== "string" || !authorization.startsWith("Bearer "))) {
         return res.status(401).json({ message: "Log in to continue" });
+    }
+    if (cookieToken && !["GET", "HEAD", "OPTIONS"].includes(req.method) && !allowedOrigin(req.headers.origin)) {
+        return res.status(403).json({ message: "Request origin is not allowed" });
     }
 
     if (!process.env.JWT_SECRET) {
@@ -15,7 +20,7 @@ async function requireAuth(req, res, next) {
 
     let payload;
     try {
-        payload = jwt.verify(authorization.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
+        payload = jwt.verify(cookieToken || authorization.slice(7), process.env.JWT_SECRET, { algorithms: ["HS256"] });
     } catch {
         return res.status(401).json({ message: "Invalid or expired login token" });
     }

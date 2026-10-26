@@ -51,7 +51,7 @@ async function publishSubmission(submission) {
     }
 
     const result = {};
-    for (const field of ["_id", "problem", "contest", "language", "status", "passedTests", "totalTests", "executionTimeMs", "memoryUsedMb", "judgedAt", "createdAt", "updatedAt"]) {
+    for (const field of ["_id", "problem", "contest", "language", "mode", "status", "passedTests", "totalTests", "executionTimeMs", "memoryUsedMb", "judgedAt", "createdAt", "updatedAt"]) {
         if (submission[field] !== undefined) result[field] = submission[field];
     }
 
@@ -71,7 +71,7 @@ async function publishContest(contestId) {
 async function publishRun(run) {
     if (!run || !mongoose.isObjectIdOrHexString(run._id) || !mongoose.isObjectIdOrHexString(run.user)) return false;
     const result = {};
-    for (const field of ["_id", "status", "language", "createdAt", "updatedAt"]) {
+    for (const field of ["_id", "status", "language", "mode", "createdAt", "updatedAt"]) {
         if (run[field] !== undefined) result[field] = run[field];
     }
     return sendRealtime(emitter => emitter.to(`user:${run.user}`).emit("run:updated", { run: result }));

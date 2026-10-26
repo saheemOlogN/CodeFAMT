@@ -46,6 +46,8 @@ beforeEach(t => {
 function response() {
     return {
         statusCode: 200,
+        cookie(name, value, options) { this.sessionCookie = { name, value, options }; return this; },
+        clearCookie(name, options) { this.clearedCookie = { name, options }; return this; },
         status(value) { this.statusCode = value; return this; },
         json(body) { this.body = body; return this; },
     };
@@ -294,7 +296,7 @@ test("resending an OTP for an unknown user returns a generic success without mai
     assert.equal(res.statusCode, 200);
 });
 
-test("login checks password and verification before issuing a one-hour token", async t => {
+test("login issues a 30-day token and persistent HttpOnly cookie after verification", async t => {
     let verified = false;
     let correctPassword = false;
     const storedUser = user({ tokenVersion: 3 });
@@ -317,7 +319,11 @@ test("login checks password and verification before issuing a one-hour token", a
     const token = jwt.verify(res.body.token, process.env.JWT_SECRET, { algorithms: ["HS256"] });
     assert.equal(token.sub, userId);
     assert.equal(token.version, 3);
-    assert.equal(token.exp - token.iat, 3600);
+    assert.equal(token.exp - token.iat, 30 * 24 * 60 * 60);
+    assert.equal(res.sessionCookie.value, res.body.token);
+    assert.equal(res.sessionCookie.options.httpOnly, true);
+    assert.equal(res.sessionCookie.options.sameSite, "lax");
+    assert.equal(res.sessionCookie.options.maxAge, 30 * 24 * 60 * 60 * 1000);
     assert.equal(res.body.user.passwordHash, undefined);
     assert.equal(res.body.user.tokenVersion, undefined);
 });

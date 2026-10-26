@@ -134,7 +134,7 @@ test("forgot password stores a scoped HMAC and sends a six-digit code only to a 
         return { sendMail: async message => {
             delivered++;
             assert.equal(message.to, email);
-            assert.equal(message.subject, "CODEFAMT password reset");
+            assert.equal(message.subject, "CodeFAMT password reset");
             assert.match(message.text, /123456/);
         } };
     });

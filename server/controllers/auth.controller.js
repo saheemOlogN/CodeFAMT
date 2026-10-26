@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
+const sessionCookie = require("../utils/sessionCookie");
 const mongoose = require("mongoose");
 const User = require("../models/user.model");
 const Otp = require("../models/otp.model");
@@ -191,6 +192,9 @@ async function resendOtp(req, res) {
 
 async function login(req, res) {
     try {
+        if (req.headers?.origin && !sessionCookie.allowedOrigin(req.headers.origin)) {
+            return res.status(403).json({ message: "Request origin is not allowed" });
+        }
         const { email, password } = req.body || {};
 
         if (typeof email !== "string" || typeof password !== "string" || !password) {
@@ -220,9 +224,10 @@ async function login(req, res) {
         const token = jwt.sign({ version: user.tokenVersion }, process.env.JWT_SECRET, {
             subject: user._id.toString(),
             algorithm: "HS256",
-            expiresIn: "1h",
+            expiresIn: "30d",
         });
 
+        res.cookie(sessionCookie.name, token, { ...sessionCookie.options(), maxAge: sessionCookie.lifetimeMs });
         return res.status(200).json({
             message: "Logged in successfully",
             token,
@@ -244,6 +249,7 @@ async function logout(req, res) {
     try {
         await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
         await require("../utils/realtime").disconnectUser(req.user._id);
+        res.clearCookie(sessionCookie.name, sessionCookie.options());
         return res.status(200).json({ message: "Logged out on all devices" });
     } catch {
         return res.status(500).json({ message: "Could not log out" });

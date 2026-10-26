@@ -486,3 +486,15 @@ test("an older failed worker broadcast cannot disconnect a replacement Redis con
     assert.equal(await publishContest(contestId), true);
     assert.equal(created, 2);
 });
+
+
+test("30-day cookie sessions stay connected without overflowing the expiry timer", async () => {
+    const socket = await connected({}, { extraHeaders: {
+        Cookie: `codefamt-session=${token(userId, { expiresIn: "30d" })}`,
+        Origin: "http://localhost:5173",
+    } });
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.equal(socket.connected, true);
+    const result = await acknowledge(socket, "contest:join", { contestId });
+    assert.equal(result.success, true);
+});

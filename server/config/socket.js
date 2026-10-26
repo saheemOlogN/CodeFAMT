@@ -6,9 +6,11 @@ const User = require("../models/user.model");
 const Contest = require("../models/contest.model");
 const ContestParticipant = require("../models/contestParticipant.model");
 const { setRealtimeServer } = require("../utils/realtime");
+const { readCookie, allowedOrigin } = require("../utils/sessionCookie");
 
 async function checkLogin(socket) {
-    const token = socket.handshake.auth?.token;
+    const token = socket.handshake.auth?.token || readCookie(socket.handshake.headers?.cookie);
+    if (!socket.handshake.auth?.token && !allowedOrigin(socket.handshake.headers?.origin)) throw new Error("Invalid session origin");
 
     if (typeof token !== "string" || token.length > 8192 || !process.env.JWT_SECRET) {
         throw new Error("Please log in again");
@@ -35,7 +37,7 @@ async function initializeSocket(httpServer, options = {}) {
     const origin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
     const io = new Server(httpServer, {
         transports: ["websocket"],
-        cors: { origin },
+        cors: { origin, credentials: true },
         maxHttpBufferSize: 4096,
         allowRequest(req, callback) {
             callback(null, !req.headers.origin || req.headers.origin === origin);
@@ -97,7 +99,14 @@ async function initializeSocket(httpServer, options = {}) {
         let joining = false;
         let joinCount = 0;
         let joinWindow = Date.now();
-        const expiryTimer = setTimeout(() => socket.disconnect(true), Math.max(1, socket.data.expiresAt - Date.now()));
+        let expiryTimer;
+        function scheduleExpiry() {
+            const remaining = socket.data.expiresAt - Date.now();
+            if (remaining <= 0) return socket.disconnect(true);
+            expiryTimer = setTimeout(scheduleExpiry, Math.min(remaining, 2147483647));
+            expiryTimer.unref();
+        }
+        scheduleExpiry();
         const loginTimer = setInterval(async () => {
             if (checking) return;
             checking = true;
@@ -109,7 +118,6 @@ async function initializeSocket(httpServer, options = {}) {
                 checking = false;
             }
         }, 15000);
-        expiryTimer.unref();
         loginTimer.unref();
 
         socket.on("contest:join", async (body, acknowledge) => {
