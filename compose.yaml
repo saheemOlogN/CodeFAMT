@@ -1,0 +1,72 @@
+services:
+  web:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in the root .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+  api:
+    build: .
+    image: codefamt:local
+    restart: unless-stopped
+    init: true
+    env_file: ./server/.env.production
+    environment:
+      NODE_ENV: production
+      PORT: 6767
+      TRUST_PROXY: 1
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    stop_grace_period: 35s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:6767/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      start_period: 150s
+      retries: 3
+  worker:
+    build: .
+    image: codefamt:local
+    command: ["node", "worker.js"]
+    restart: unless-stopped
+    init: true
+    env_file: ./server/.env.production
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      WORKER_HEALTH_PORT: 6768
+    depends_on:
+      redis:
+        condition: service_healthy
+    stop_grace_period: 35s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:6768').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      start_period: 150s
+      retries: 3
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:

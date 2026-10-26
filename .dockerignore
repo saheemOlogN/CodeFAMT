@@ -1,0 +1,11 @@
+.git
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.log
+.local-backups
+**/coverage
+server/tests
+server/fixtures
+server/scripts/reset-test-content.js

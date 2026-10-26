@@ -1,14 +1,16 @@
-# CODEFAMT backend
+# CodeFAMT backend
 
 Plain CommonJS JavaScript. Express setup stays in index.js. Controllers use named async functions, direct model calls and try/catch.
 
 ## Start
 
-Use Node.js 24. From the server folder, run `npm install`, then run `npm run dev` in one terminal and `npm run worker:dev` in another. For deployment use `npm start` and `npm run worker`. Both processes are required.
+Use Node.js 24. From the server folder, run `npm install`, then `npm run dev`. This starts both the API and execution worker with automatic reload; Ctrl+C stops both. Wait for the API listening message and `CodeFAMT execution worker is running`. Run and Submit need the worker to process queued jobs. For separate development terminals, use `npm run dev:api` and `npm run worker:dev`. For deployment use `npm start` and `npm run worker`. Both processes are required.
+
+The launch scripts enable Node's on-disk compile cache to reuse compiled dependencies on repeat starts. The API connects MongoDB, its execution queue, and realtime sockets in parallel, and listens only after all three are ready. Startup logs show dependency-loading time and each service's connection time. MongoDB gets a 30-second selection window and up to three attempts for temporary network failures, with short backoffs. Its startup deadline is 120 seconds to include index preparation; other services retain a 15-second deadline. Healthy connections return immediately. Authentication and configuration errors are not retried. Index initialization and required data backfills still complete before the API accepts requests.
 
 The npm scripts load .env. Configure PORT, MONGODB_URI, JWT_SECRET, OTP_SECRET, SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, ONLINECOMPILER_API_KEY, CLIENT_ORIGIN and REDIS_URL. Hosted Redis normally provides a redis:// or rediss:// URL. Set REDIS_PREFIX=codefamt, JUDGE_CONCURRENCY=2 and COMPILER_RUNS_PER_MINUTE=30; adjust the latter two to your provider plan. Keep secrets in this ignored file.
 
-Use MongoDB Atlas or a replica set. An accepted submission and its solved-problem record are saved in a transaction so both changes succeed together. Standalone MongoDB does not support these transactions. See [MongoDB requirements](https://www.mongodb.com/docs/manual/core/transactions-production-consideration/) and [Mongoose transactions](https://mongoosejs.com/docs/transactions.html).
+Use MongoDB Atlas or a replica set running MongoDB 5.0 or later. The college leaderboard uses window functions for shared ranks. An accepted submission and its solved-problem record are saved in a transaction so both changes succeed together. Standalone MongoDB does not support these transactions. See [MongoDB requirements](https://www.mongodb.com/docs/manual/core/transactions-production-consideration/) and [Mongoose transactions](https://mongoosejs.com/docs/transactions.html).
 
 API instances and workers must share MongoDB, REDIS_URL and REDIS_PREFIX. Redis shares execution concurrency, compiler request budgets, HTTP rate limits and socket broadcasts. MongoDB transactions serialize admin writes. Startup does not reset active submissions. A worker scans unfinished MongoDB records every 15 seconds to recover missing queue jobs.
 
@@ -60,9 +62,19 @@ Registration accepts only @famt.ac.in addresses. Departments: mechanical, cybers
 
 OTPs expire after five minutes, allow five verification attempts and have a 60-second resend cooldown. Verification receives the registration fields again so the email owner chooses the final profile and password. Resending does not change an existing pending account's credentials.
 
-Login returns a one-hour token. Send `Authorization: Bearer <token>` on every other API group and logout. The account must remain verified and its session version must match. Logout and password changes invalidate previous tokens.
+Login issues a 30-day token and a persistent HttpOnly, SameSite=Lax session cookie (Secure in production). Browser requests include the cookie; cookie-authenticated writes require the configured CLIENT_ORIGIN. Realtime sessions use the same cookie. Existing bearer clients remain supported. Send `Authorization: Bearer <token>` on every other API group and logout. The account must remain verified and its session version must match. Logout and password changes invalidate previous tokens.
 
 Registration always creates a student. Bootstrap the first admin by verifying that account, then setting its role to admin using MongoDB Compass or your database console. No public endpoint grants admin access.
+
+## College leaderboard
+
+`GET /api/users/leaderboard` requires a verified account. Optional filters are `department`, `year`, and a public `problemId`. Pagination accepts `page` and `limit` (20 by default, at most 100).
+
+The response is `{ leaderboard, page, limit, total }`. Each row contains `rank`, `user: { id, name, department, year }`, `solvedCount`, `easyCount`, `mediumCount`, `hardCount`, and `lastSolvedAt`. Email addresses and other private account fields are excluded.
+
+Overall and cohort rankings include all verified students, count unique solved public problems, and share ranks for equal counts (1, 1, 3). Equal counts are ordered by earliest last solve, then user ID. A problem filter includes only its solvers and ranks by first acceptance time, then user ID. Hidden and deleted problems never count.
+
+Run the isolated database fixture test with `RUN_LEADERBOARD_INTEGRATION=1` and `MONGODB_URI` configured: `node --env-file=.env --test tests/leaderboard.test.js`. It creates and removes a randomly named test database.
 
 ## Problems and hidden tests
 
@@ -99,7 +111,7 @@ Problem lists accept page, limit, difficulty, tag and admin visibility. Lists de
 
 Create with title, optional description, ISO startTime and endTime, and `problems: [{ problem: "<problemId>", points: 100 }]`. A contest allows up to 20 distinct problems.
 
-Publish with `{ "status": "published" }` before its start. Every selected problem must have contest visibility and hidden tests. Weekly contests are scheduled by creating their dates; recurring generation is not implemented.
+Publish with `{ "status": "published" }` before its start. Every selected problem must be an unused draft or contest problem with function templates and hidden tests. Publication locks drafts automatically. Weekly contests are scheduled by creating their dates; recurring generation is not implemented.
 
 A problem cannot be reused in another published contest because its earlier participants could already know the statement. Create fresh problems for each contest. Cancelled contests release their problems for publication elsewhere.
 
@@ -120,7 +132,7 @@ Each accepted problem earns its points once. Equal scores are ordered by the ear
 | GET | /api/submissions/:id | Own source and result; admins can inspect |
 | POST | /api/submissions/:id/retry | Empty body; retry an internal error using saved source |
 
-Languages: c, cpp, java, python, javascript. Source allows 50000 UTF-8 bytes. Write complete programs reading standard input and printing standard output. Java runs its first top-level class in source-file mode.
+Languages: c, cpp, java, python, javascript. Source allows 50000 UTF-8 bytes. Students complete the configured function template. Hidden drivers supply headers, input parsing and output formatting.
 
 Custom runs use only supplied input. POST returns HTTP 202 with a run ID; GET /api/submissions/runs/:id returns its status and, when completed, output/diagnostics. They never load hidden tests or change solved counts.
 
@@ -186,3 +198,27 @@ Verified on 20 October 2026:
 - Dependency audit reported zero known vulnerabilities.
 
 These are functional and limited concurrency checks, not a full college-wide capacity benchmark. Before hosting a contest, verify inbox delivery, set Redis to noeviction, deploy the API and worker, and test the expected student load against your compiler plan. Frontend clients must refetch state and rejoin contest rooms after reconnecting.
+
+
+## Function drivers
+
+Admins configure `starter`, `prefix`, and `suffix` for each supported language. The starter defines the function signature shown to students; prefix/suffix supply headers, helpers and input/output handling. The provided addition example must be adapted to the actual problem. Drivers run on the remote compiler. The API stores a private execution snapshot so retries use the same driver; students receive only their original solution and the public starter. Function drafts remain scoped to each student, problem, contest and language, separately from historical CP drafts.
+
+## Contest-first authoring and function-only solutions
+
+New runs and submissions use `mode: "dsa"` by default; explicitly requesting `cp` is rejected. Historical full-program submissions and their saved execution snapshots remain readable. A published legacy problem without function templates can receive its first `dsa` configuration through an admin PATCH containing only `dsa`; existing definitions, tests and configured drivers remain locked.
+
+In Administration, create a contest, then use **Create problem** inside its dialog. Save each problem draft, configure supported language templates and hidden drivers, and add tests. Return to the contest: the saved problem is already attached. Existing unused drafts can also be selected. Contest publication validates templates/tests and freezes attached drafts in the same transaction. Those same records become available in Problems, normal practice runs/submissions, profile difficulty totals, and the college leaderboard after the published contest's end time. Upcoming, active, draft and cancelled contest-only problems are excluded from practice. No duplicate problem or scheduled copying is required.
+
+Admins can upload a JSON array or `{ "testCases": [{ "input": "2 3\n", "expectedOutput": "5\n" }] }` in the hidden-test editor. Preview and confirm the import. It appends to existing tests; it does not replace them. Maximum file/payload size is 750,000 bytes and total tests per problem is 100. Both fields are strings matching the hidden driver's input/output format. `POST /api/problems/:problemId/tests/import` accepts the object form, validates every row and saves the batch in the admin transaction. Download the example from the editor.
+
+`GET /api/roadmap` is available to authenticated users. `PUT /api/roadmap` is admin-only and replaces the shared roadmap (`title`, `description`, `sheetUrl`, and up to 100 `steps` with `title`, `description`, `resourceUrl`). Admins edit it directly from the Roadmap page, including ordering topics. All links must be HTTPS. Configure sharing permissions at the sheet/resource host.
+
+
+### Roadmap progress and test drafts
+
+Roadmap steps have stable `id` values. Preserve these IDs when editing or reordering a topic. `GET /api/roadmap` returns the shared roadmap and the signed-in user's `completed` step IDs. `PATCH /api/roadmap/progress` accepts `{ "stepId": "...", "completed": true }`; it changes only the authenticated user's progress. Removed topics are excluded from progress totals. The UI provides topic checkboxes and a completion percentage; admin editing and profile information use dialogs.
+
+The C++ roadmap fixture links to Striver's official A2Z sheet and contains original CodeFAMT topic checkpoints. Admins can change all content through Roadmap → Edit roadmap. The three sample draft problems include C++ function templates and four hidden tests each. To test: Administration → New contest → choose draft problems → Save draft → Publish contest before its start time. Join as a student, submit during the contest, then practise the same problems after it ends.
+
+`node --env-file=.env scripts/reset-test-content.js --apply` is a destructive, explicitly invoked development utility, never a startup step. It backs up existing problems, tests, dependent submission/solve history and roadmap to the git-ignored `.local-backups/` directory before replacing them. It refuses contest-linked problems or active submissions, preserves accounts, and writes changes transactionally. Do not rerun it on real student content. Reference solutions in `fixtures/draft-problems.json` are verification fixtures and are never sent to students.

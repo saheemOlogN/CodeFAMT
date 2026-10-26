@@ -4,3 +4,8 @@ node_modules/
 *.log
 coverage/
 dist/
+
+.local-backups/
+
+!.env.example
+!server/.env.example

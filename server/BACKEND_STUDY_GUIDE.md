@@ -1,10 +1,10 @@
-**CODEFAMT backend study guide**
+**CodeFAMT backend study guide**
 
 Read this alongside the files in server. Begin with the profile request near the end, then work through registration and submissions.
 
 **The overall structure**
 
-CODEFAMT runs two Node.js programs:
+CodeFAMT runs two Node.js programs:
 
 - index.js starts the API and Socket.IO server. It handles requests from the frontend.
 - worker.js starts the execution worker. It processes code execution jobs in the background.
