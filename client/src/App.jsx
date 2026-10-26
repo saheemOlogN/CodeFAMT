@@ -1,122 +1,77 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
+import { lazy, Suspense } from 'react'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from './context/AuthProvider'
+import { useAuth } from './context/auth'
+import Layout from './components/Layout'
+import AuthPage from './pages/AuthPage'
+import ProfilePage from './pages/ProfilePage'
+import ProblemsPage from './pages/ProblemsPage'
+const ProblemPage = lazy(() => import('./pages/ProblemPage'))
+const SubmissionsPage = lazy(() => import('./pages/SubmissionsPage'))
+const SubmissionDetailPage = lazy(() => import('./pages/SubmissionsPage').then(module => ({ default: module.SubmissionDetailPage })))
+import ContestsPage from './pages/ContestsPage'
+import ContestPage from './pages/ContestPage'
+import SolvedPage from './pages/SolvedPage'
+import LeaderboardPage from './pages/LeaderboardPage'
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+import RoadmapPage from './pages/RoadmapPage'
+import { RealtimeProvider } from './context/RealtimeProvider'
 import './App.css'
+import './Platform.css'
+import './pages/ProfilePage.css'
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+function ProtectedPage({ admin = false, children }) {
+  const { user, loading, error, refreshUser } = useAuth()
+  if (loading)
+    return (
+      <div className="page-status" role="status">
+        Loading your account...
+      </div>
+    )
+  if (error)
+    return (
+      <div className="page-status">
+        <p role="alert">{error}</p>
+        <button onClick={() => refreshUser()}>Try again</button>
+      </div>
+    )
+  if (!user) return <Navigate to="/login" replace />
+  if (admin && user.role !== 'admin') return <Navigate to="/profile" replace />
+  return children || <ProfilePage />
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <RealtimeProvider>
+        <Layout>
+          <Suspense fallback={<div className="page-status" role="status">Loading page…</div>}><Routes>
+            <Route path="/" element={<Navigate to="/problems" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/problems" replace />} />
+            <Route path="/problems" element={<ProtectedPage><ProblemsPage /></ProtectedPage>} />
+            <Route path="/problems/:problemId" element={<ProtectedPage><ProblemPage /></ProtectedPage>} />
+            <Route path="/submissions" element={<ProtectedPage><SubmissionsPage /></ProtectedPage>} />
+            <Route path="/submissions/:submissionId" element={<ProtectedPage><SubmissionDetailPage /></ProtectedPage>} />
+            <Route path="/contests" element={<ProtectedPage><ContestsPage /></ProtectedPage>} />
+            <Route path="/contests/:contestId" element={<ProtectedPage><ContestPage /></ProtectedPage>} />
+            <Route path="/contests/:contestId/problems/:problemId" element={<ProtectedPage><ProblemPage /></ProtectedPage>} />
+            <Route path="/solved" element={<ProtectedPage><SolvedPage /></ProtectedPage>} />
+            <Route path="/leaderboard" element={<ProtectedPage><LeaderboardPage /></ProtectedPage>} />
+            <Route path="/roadmap" element={<ProtectedPage><RoadmapPage /></ProtectedPage>} />
+            <Route path="/login" element={<AuthPage mode="login" />} />
+            <Route path="/register" element={<AuthPage mode="register" />} />
+            <Route
+              path="/forgot-password"
+              element={<AuthPage mode="reset" />}
+            />
+            <Route path="/profile" element={<ProtectedPage />} />
+            <Route path="/admin" element={<ProtectedPage admin><AdminPage /></ProtectedPage>} />
+            <Route path="*" element={<Navigate to="/problems" replace />} />
+          </Routes></Suspense>
+        </Layout>
+        </RealtimeProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  )
+}

@@ -1,0 +1,16 @@
+.app-dialog { width: min(860px, calc(100vw - 40px)); max-width: none; max-height: min(90dvh, 1000px); padding: 0; margin: auto; overflow: hidden; color: #eceeee; background: #202426; border: 1px solid #34383a; border-radius: 10px; box-shadow: 0 24px 80px #0008; }
+.app-dialog[open] { display: flex; flex-direction: column; }
+.app-dialog::backdrop { background: #080b0dc4; }
+.app-dialog-header { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 28px; border-bottom: 1px solid #34383a; }
+.app-dialog-header h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.4; }
+.app-dialog-header h2:focus { outline: none; }
+.app-dialog-close { width: 36px; height: 36px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: #aeb6ba; }
+.app-dialog-close:hover { background: #ffffff08; color: #fff; }
+.app-dialog-close:focus-visible { outline: 2px solid #adbcc5; outline-offset: 2px; }
+.app-dialog-close:disabled { opacity: .4; cursor: not-allowed; }
+.app-dialog-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 26px 28px 8px; scrollbar-gutter: stable; }
+@media (max-width: 600px) {
+  .app-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .app-dialog-header { padding: 15px 18px; }
+  .app-dialog-content { padding: 20px 18px 0; }
+}

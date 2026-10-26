@@ -1,0 +1,44 @@
+.platform-page.problem-library { max-width: 1320px; }
+.library-topics { display: flex; flex-wrap: wrap; gap: 10px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.topic-chip { display: inline-flex; align-items: center; gap: 9px; min-height: 42px; padding: 9px 17px; border: 1px solid transparent; border-radius: 24px; background: #2c2c2f; color: #c5c5cd; font-size: 14px; font-weight: 500; text-transform: capitalize; }
+.topic-chip span { font-size: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
+.topic-chip:hover { background: #38383c; }
+.topic-chip[aria-pressed='true'] { background: #fafafa; color: #202023; }
+.library-toolbar { display: flex; align-items: center; gap: 10px; padding: 20px 0; }
+.library-toolbar .search-field { flex: 0 1 340px; border-radius: 24px; background: #2a2a2d; border-color: transparent; height: 40px; }
+.library-sort { width: 144px; height: 40px; border-radius: 20px; background: #2a2a2d; border-color: transparent; font-size: 13px; }
+.library-filter-button { border-radius: 50%; background: #2a2a2d; }
+.library-filter-button[aria-expanded='true'] { background: #46464b; color: white; }
+.library-solved { margin-left: auto; display: inline-flex; gap: 5px; white-space: nowrap; font-size: 14px; font-variant-numeric: tabular-nums; }
+.library-solved span { color: var(--muted); }
+.library-filters { display: flex; gap: 16px; margin-bottom: 18px; }
+.library-filters label { width: 180px; font-size: 13px; }
+.library-filter-summary { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; color: var(--muted); font-size: 13px; }
+.question-list { width: 100%; border-collapse: separate; border-spacing: 0 4px; text-align: left; }
+.question-list td { height: 54px; padding: 13px 16px; font-size: 14px; }
+.question-list tr:nth-child(odd) td { background: #262629; }
+.question-list tr:hover td { background: #303034; }
+.question-list td:first-child { border-radius: 8px 0 0 8px; }
+.question-list td:last-child { border-radius: 0 8px 8px 0; }
+.question-list .question-status { width: 40px; padding-right: 0; color: #3fc57c; }
+.question-status svg { vertical-align: middle; }
+.question-title { font-size: 15px; font-weight: 600; line-height: 1.6; color: #f0f0f2; display: block; }
+.question-number { font-variant-numeric: tabular-nums; }
+.question-topics { max-width: 180px; color: #9e9ea8; text-align: right; }
+.question-difficulty { width: 100px; white-space: nowrap; }
+.question-difficulty .difficulty { font-size: 14px; }
+.question-difficulty .difficulty-easy { color: #30c8ce; }
+.question-difficulty .difficulty-medium { color: #efc34f; }
+.question-difficulty .difficulty-hard { color: #f3767f; }
+@media (max-width: 760px) {
+  .library-toolbar { flex-wrap: wrap; }
+  .library-toolbar .search-field { flex: 1 1 65%; }
+  .library-sort { width: 125px; }
+  .library-solved { margin-left: auto; }
+  .question-topics { display: none; }
+  .question-list td { padding: 12px 10px; }
+  .question-list .question-status { width: 30px; }
+  .question-title { font-size: 14px; }
+  .question-difficulty { width: 72px; }
+  .topic-chip { padding: 7px 12px; min-height: 36px; font-size: 13px; }
+}

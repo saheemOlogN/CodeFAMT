@@ -1,0 +1,30 @@
+.leaderboard-page { font-size: 14px; }
+.leaderboard-page .platform-heading { margin-bottom: 28px; }
+.leaderboard-page .platform-heading h1 { font-size: 28px; font-weight: 700; }
+.leaderboard-page .platform-heading p { margin-top: 8px; font-size: 14px; }
+.leaderboard-page .leaderboard-filters { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(120px, .65fr) minmax(200px, 1.5fr) auto; align-items: end; gap: 16px; margin-bottom: 28px; }
+.leaderboard-page .leaderboard-filters label { font-size: 13px; font-weight: 600; gap: 8px; }
+.leaderboard-page .leaderboard-filters select { width: 100%; min-width: 0; height: 42px; font-size: 14px; font-weight: 400; }
+.leaderboard-reset { height: 42px; padding-inline: 16px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.leaderboard-filter-error { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; font-size: 14px; }
+.leaderboard-table { font-size: 14px; }
+.leaderboard-table th { font-size: 13px; font-weight: 600; }
+.leaderboard-table strong { font-weight: 600; }
+.leaderboard-table .leaderboard-rank { width: 68px; font-variant-numeric: tabular-nums; }
+.leaderboard-table .leaderboard-number { text-align: right; font-variant-numeric: tabular-nums; }
+.leaderboard-table .leaderboard-current-user { background: #ffffff05; }
+.leaderboard-table .leaderboard-current-user td:first-child { box-shadow: inset 2px 0 0 #8d9aa7; }
+.leaderboard-student { display: flex; align-items: baseline; gap: 9px; min-width: 150px; }
+.leaderboard-you { color: var(--muted); font-size: 13px; }
+.leaderboard-year, .leaderboard-date { white-space: nowrap; }
+.leaderboard-page .pagination, .leaderboard-page .empty-state p { font-size: 14px; }
+.leaderboard-page .empty-state h3 { font-size: 16px; font-weight: 600; }
+@media (max-width: 900px) {
+  .leaderboard-page .leaderboard-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .leaderboard-reset { justify-self: start; }
+}
+@media (max-width: 560px) {
+  .leaderboard-page .leaderboard-filters { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .leaderboard-page .pagination { flex-wrap: wrap; }
+}
+

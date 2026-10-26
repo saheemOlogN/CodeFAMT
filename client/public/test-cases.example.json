@@ -1,0 +1,6 @@
+{
+  "testCases": [
+    { "input": "2 3\n", "expectedOutput": "5\n" },
+    { "input": "-4 4\n", "expectedOutput": "0\n" }
+  ]
+}
