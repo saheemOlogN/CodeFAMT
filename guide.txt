@@ -1,0 +1,1296 @@
+CODEFAMT - FILE AND FUNCTION GUIDE
+Based on the working source on 31 October 2026.
+
+HOW TO USE THIS GUIDE
+Search for a file path or function name. Paths are relative to the repository.
+The README covers setup/deployment; this guide explains the code.
+A component renders UI. A hook shares state/data behavior. A controller handles
+an API request. Middleware checks that request. A model defines stored data.
+A worker processes queued jobs outside the HTTP request.
+
+Coverage: every project-owned tracked file, including tests, styles and config.
+Named functions and local event helpers are described under their source file.
+Repeated inline map/filter callbacks, React effects, schema validators and mock
+callbacks are explained with their owner instead of given invented names.
+node_modules, generated dist files, Git internals, private environment values and
+local backups are not source files and are not enumerated. Embedded example
+solution functions are learning fixtures, not application functions.
+
+MAIN FLOWS
+1. Startup: server/dev.js starts server/index.js and server/worker.js.
+   Browser: client/src/main.jsx -> App.jsx -> Layout and the selected page.
+2. Login: AuthPage -> AuthProvider/api -> auth routes/controller -> User.
+   The browser receives an HttpOnly cookie; protected requests check it again.
+3. Run: ProblemWorkspace -> runCode -> CodeRun -> queue -> processExecution.
+   Public examples are checked; a Run does not award a solved problem.
+4. Submit: submitCode -> saved Submission -> queue -> worker -> gradeSubmission
+   -> executeCode + judgeResults -> saved verdict and unique solved record.
+   Socket events/polling bring the result back to the browser.
+5. Contest: AdminPage -> contest controller -> transactional publication.
+   The server enforces registration, access and submission deadlines.
+6. Roadmap: RoadmapPage -> roadmap controller -> shared content and personal
+   completed topic IDs. Student progress is stored per account.
+
+IMPORTANT BOUNDARIES
+Run/Submit need MongoDB, Redis, the worker and compiler credentials.
+Public problem responses strip hidden drivers; hidden tests require admin access.
+The reset-test-content utility is destructive: use disposable development data.
+Old CP fields remain for stored-record compatibility; the student flow uses DSA.
+This guide describes the source; it does not guarantee production readiness.
+
+
+========================================================================
+BACKEND ENTRY AND CONFIG
+========================================================================
+
+server/config/compileCache.js
+Enables the Node compile cache to speed up repeated dependency loading.
+  No named application functions; this file defines data or configuration.
+
+server/config/db.js
+Prepares the database before requests or jobs are accepted.
+  connectDB(): Connects with bounded retries, checks transaction support in production, creates model indexes and initializes required session/queue versions and the admin lock.
+
+server/config/environment.js
+Checks production settings.
+  validateEnvironment(): Requires service credentials, sufficiently long signing secrets, an exact HTTPS origin, valid ports and an explicit proxy-hop count.
+
+server/config/redis.js
+Owns Redis connection creation and the shared client.
+  createRedisConnection(): Creates a lazy Redis connection with retry and timeout settings.
+  getRedis(): Returns the shared client, creating it on first use.
+  closeRedis(): Disconnects and clears the shared client.
+
+server/config/socket.js
+Sets up authenticated realtime connections and contest rooms.
+  checkLogin(): Validates a cookie/bearer token, origin, verified account, session version and expiry.
+  initializeSocket(): Attaches Socket.IO, configures Redis broadcasting and registers room/authentication handlers.
+  scheduleExpiry(): Schedules disconnection when the login expires.
+  Socket callbacks: Recheck access for contest rooms, handle room joins/leaves, acknowledgements, disconnects and cleanup.
+
+server/dev.js
+Runs the API and worker together during development.
+  startDevelopment(): Launches both Node watch processes and installs signal/error handlers.
+  stop(): Stops both children; uses process-tree termination on Windows.
+
+server/index.js
+Creates the Express API, security headers, API routes, health endpoints and production frontend serving. Starts services only when executed directly.
+  stop(): Gracefully closes sockets, queues, Redis and MongoDB on shutdown.
+  Inline handlers: Answer liveness/readiness, reject unknown API routes, and serve the SPA. The startup callback starts HTTP only after required services initialize.
+
+server/worker.js
+Entry point for the background judge process.
+  start(): Validates settings, connects services, recovers jobs, starts the worker, heartbeat, health server and recovery timer.
+  stop(): Stops the health server, heartbeat, timers, worker and service connections.
+  Timer/HTTP callbacks: Recover missing jobs every 15 seconds and report worker readiness.
+
+========================================================================
+ROUTES, MIDDLEWARE AND CONTROLLERS
+========================================================================
+
+server/controllers/activity.controller.js
+Submission activity for the profile heatmap.
+  getActivity(): Validate the requested year and aggregate the user’s submissions by day in India time.
+
+server/controllers/auth.controller.js
+Registration, verification and login.
+  register(): Validate college registration and initiate email verification.
+  verifyOtp(): Validate the OTP and create/verify the account using the submitted registration details.
+  resendOtp(): Send another verification code subject to cooldown rules.
+  login(): Check credentials and issue the persistent session cookie.
+  logout(): Revoke sessions, clear the cookie and disconnect the user.
+
+server/controllers/contest.controller.js
+Contest schedules, participation, access and standings.
+  createContest(): Validate and create a draft contest.
+  getContests(): List contests with pagination and role-appropriate fields.
+  getContest(): Return schedule and accessible contest information.
+  updateContest(): Validate draft edits and publication; check attached problems/tests and immutable state.
+  deleteContest(): Delete a permitted draft.
+  joinContest(): Register the current student if contest rules allow it.
+  getContestProblem(): Check contest access and return the student-safe problem.
+  getLeaderboard(): Aggregate contest scores and ranks without counting repeat solves twice.
+
+server/controllers/leaderboard.controller.js
+College-wide rankings, separate from contest standings.
+  getLeaderboard(): Validate department/year/problem filters and return ranked paginated results.
+  The local leaderboard variable holds formatted result rows; it is data, not a function.
+
+server/controllers/passwordReset.controller.js
+Email-based account recovery.
+  forgotPassword(): Create and email a reset OTP without revealing account existence.
+  resetPassword(): Validate the reset code, replace the password hash and revoke old sessions.
+
+server/controllers/problem.controller.js
+Problem creation, publication and student access.
+  createProblem(): Validate and create a problem draft.
+  getProblems(): Return a paginated list appropriate to user access and filters.
+  getProblem(): Return one accessible problem with hidden driver details removed for students.
+  updateProblem(): Validate edits and publication, enforce locks and handle legacy function-template configuration.
+  deleteProblem(): Delete an eligible unused draft while protecting published/referenced content.
+
+server/controllers/profileStats.controller.js
+Profile statistics.
+  getProfileStats(): Aggregate practice/contest statistics and recent activity for the authenticated profile.
+
+server/controllers/roadmap.controller.js
+Shared roadmap content and personal progress.
+  safeUrl(): Accept empty links or valid HTTPS URLs without embedded credentials.
+  validRoadmap(): Check fields, lengths, topic limits and unique step IDs.
+  text(): Local helper checking text type, length and required content.
+  identifiedSteps(): Supply deterministic IDs to older steps lacking an ID.
+  getRoadmap(): Return roadmap content and the current user’s valid completed steps.
+  saveProgress(): Add/remove one valid topic ID on the current account.
+  saveRoadmap(): Validate and save admin-authored content, assigning IDs to new topics.
+
+server/controllers/submission.controller.js
+Run, Submit, result retrieval and retry endpoints.
+  submissionResponse(): Choose safe fields for submission responses.
+  runCode(): Validate code/access and queue execution; example mode snapshots public examples and limits on the server.
+  getRun(): Return an unexpired run result to its owner or an admin.
+  submitCode(): Validate language, access, contest receipt time and tests; save executable source and enqueue judging.
+  getSubmissions(): List permitted submissions with pagination.
+  getSubmission(): Return an authorized submission detail.
+  retrySubmission(): Requeue an eligible internal error using the original source and contest receipt.
+
+server/controllers/testCase.controller.js
+Admin-only hidden testcase management.
+  importTestCases(): Validate and import JSON tests for an editable problem.
+  createTestCase(): Add a hidden input/expected-output pair.
+  getTestCases(): List hidden tests for authorized administration.
+  updateTestCase(): Validate and change a test while its problem is editable.
+  deleteTestCase(): Remove a test only while mutations are allowed.
+
+server/controllers/user.controller.js
+The signed-in user’s account and solved history.
+  getProfile(): Return safe profile details and solved count.
+  getSolvedProblems(): Return paginated solved records owned by the user.
+  updateProfile(): Validate and save allowed profile fields.
+  changePassword(): Verify the current password, save the new hash and revoke sessions.
+
+server/middleware/admin.middleware.js
+Protects administrative mutations.
+  requireAdmin(): Rejects users without the admin role.
+  adminWrite(controller): Wraps an admin operation in a MongoDB transaction and shared lock, buffers its response and publishes contest changes after success.
+  Buffered status()/json(): Capture the controller response until the transaction commits.
+
+server/middleware/auth.middleware.js
+Protects authenticated API requests.
+  requireAuth(): Reads cookie/bearer credentials, checks write origins, verifies the JWT and loads a verified user with a matching session version.
+
+server/middleware/error.middleware.js
+Shared API error handling.
+  handleError(): Converts errors into suitable HTTP responses without leaking internal details.
+
+server/middleware/rateLimit.middleware.js
+Shared throttling for login, accounts, password changes and execution.
+  sharedStore(name): Creates a namespaced Redis rate-limit store when Redis is configured.
+  authLimiter: Limits requests by IP. accountLimiter: Limits attempts for a normalized email.
+  executionLimiter/passwordLimiter: Limit requests by authenticated user ID.
+  Inline keyGenerator callbacks choose the email or account ID used for counting.
+
+server/routes/auth.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  POST "/register", accountLimiter, register)
+  POST "/verify-otp", accountLimiter, verifyOtp)
+  POST "/resend-otp", accountLimiter, resendOtp)
+  POST "/login", accountLimiter, login)
+  POST "/forgot-password", accountLimiter, forgotPassword)
+  POST "/reset-password", accountLimiter, resetPassword)
+  POST "/logout", requireAuth, logout)
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+server/routes/contest.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  GET "/", getContests)
+  POST "/", requireAdmin, adminWrite(createContest))
+  GET "/:id", getContest)
+  PATCH "/:id", requireAdmin, adminWrite(updateContest))
+  DELETE "/:id", requireAdmin, adminWrite(deleteContest))
+  POST "/:id/join", joinContest)
+  GET "/:id/problems/:problemId", getContestProblem)
+  GET "/:id/leaderboard", getLeaderboard)
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+server/routes/problem.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  GET "/", getProblems)
+  POST "/", requireAdmin, adminWrite(createProblem))
+  GET "/:problemId/tests", requireAdmin, getTestCases)
+  POST "/:problemId/tests", requireAdmin, adminWrite(createTestCase))
+  POST "/:problemId/tests/import", requireAdmin, adminWrite(importTestCases))
+  PATCH "/:problemId/tests/:id", requireAdmin, adminWrite(updateTestCase))
+  DELETE "/:problemId/tests/:id", requireAdmin, adminWrite(deleteTestCase))
+  GET "/:id", getProblem)
+  PATCH "/:id", requireAdmin, adminWrite(updateProblem))
+  DELETE "/:id", requireAdmin, adminWrite(deleteProblem))
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+server/routes/roadmap.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  GET '/', getRoadmap)
+  PATCH '/progress', saveProgress)
+  PUT '/', requireAdmin, adminWrite(saveRoadmap))
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+server/routes/submission.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  GET "/", getSubmissions)
+  POST "/run", executionLimiter, runCode)
+  POST "/", executionLimiter, submitCode)
+  GET "/runs/:id", getRun)
+  GET "/:id", getSubmission)
+  POST "/:id/retry", executionLimiter, retrySubmission)
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+server/routes/user.routes.js
+Connects URLs to middleware/controllers. Base paths are mounted in server/index.js.
+  GET "/leaderboard", getLeaderboard)
+  GET "/me", getProfile)
+  PATCH "/me", updateProfile)
+  GET "/me/solved", getSolvedProblems)
+  GET "/me/activity", getActivity)
+  GET "/me/stats", getProfileStats)
+  PATCH "/me/password", passwordLimiter, changePassword)
+  These registrations are not separate business-logic functions; the controllers above implement them.
+
+========================================================================
+DATABASE MODELS
+========================================================================
+
+server/models/adminLock.model.js
+Shared version record used to serialize admin changes inside transactions. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/codeRun.model.js
+Private run source/input, example snapshots, saved case results, limits and queue state; expires after 24 hours. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/contest.model.js
+Contest title, description, schedule, publication status and attached problems/points. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/contestParticipant.model.js
+A unique registration for each user/contest pair. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/otp.model.js
+Verification code hashes, expiry, attempts and resend metadata. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/passwordReset.model.js
+Password-reset code hashes, expiry and attempt limits. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/problem.model.js
+Statements, examples and friendly display inputs, constraints, limits, visibility and per-language DSA templates/drivers. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/roadmap.model.js
+Shared roadmap title, description, sheet URL and stable topic steps. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/solvedProblem.model.js
+One accepted solve per user/problem, preventing duplicate solved counts. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/submission.model.js
+Submitted code/driver snapshot, contest receipt, verdict, metrics, judging progress and queue/claim state. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/testCase.model.js
+A problem’s hidden raw input and expected output, excluded from default selections. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+server/models/user.model.js
+Accounts, college email, password hash, verification, department/year, role, private session version and roadmap progress. Defines a Mongoose schema, validation and relevant indexes; exports the model. Inline validators enforce field rules.
+  No named application functions; this file defines data or configuration.
+
+========================================================================
+JUDGING AND BACKEND HELPERS
+========================================================================
+
+server/scripts/reset-test-content.js
+Destructive development-only content replacement utility.
+  main(): Backs up existing problem-related data, replaces test content with demo drafts/tests and the C++ roadmap, then reports the backup. Never run on real student data.
+
+server/utils/executeCode.js
+Shared backend helper for executeCode.
+  executeCode(): Validate execution inputs, call the external compiler with bounded timeouts, and normalize outputs, errors and metrics.
+
+server/utils/executionQueue.js
+Shared backend helper for executionQueue.
+  getQueue(): Create/reuse the BullMQ queue with retry/retention settings.
+  initializeQueue(): Validate capacity, wait for Redis, enforce noeviction in production and set shared concurrency.
+  enqueueSubmission(): Add a versioned submission job.
+  enqueueRun(): Add a versioned run job.
+  closeQueue(): Close the queue and its Redis connection.
+
+server/utils/gradeSubmission.js
+Shared backend helper for gradeSubmission.
+  gradeSubmission(): Run hidden tests with saved progress, stop on failure, and persist acceptance plus the unique solve together in a transaction.
+
+server/utils/health.js
+Shared backend helper for health.
+  key(): Build the namespaced heartbeat Redis key.
+  readiness(): Check MongoDB, Redis and optionally a recent worker heartbeat within a timeout.
+  startHeartbeat(): Register a unique worker and start heartbeat updates; return an async cleanup callback.
+  beat(): Update/prune worker heartbeat records while the worker is running.
+
+server/utils/judgeResults.js
+Shared backend helper for judgeResults.
+  judgeResults(): Validate compiler results, compare normalized output, enforce time/memory limits and produce verdict/counts.
+
+server/utils/practiceAccess.js
+Shared backend helper for practiceAccess.
+  practiceFilter(): Build a database filter for public or released contest problems.
+  canPractice(): Check whether a particular problem is available for normal practice.
+
+server/utils/providerLimit.js
+Shared backend helper for providerLimit.
+  reserveProviderRun(): Use Redis to reserve a compiler request or signal that the job must wait for shared quota.
+
+server/utils/realtime.js
+Shared backend helper for realtime.
+  setRealtimeServer(): Store the current Socket.IO server.
+  sendRealtime(): Send through the local server or Redis emitter and handle transport failures.
+  publishSubmission(): Send safe submission updates and notify contest standings after acceptance.
+  publishContest(): Notify a contest room that its data changed.
+  publishRun(): Send safe run status updates to the owner.
+  disconnectUser(): Disconnect the account’s socket sessions.
+  closeRealtime(): Close the emitter’s Redis connection.
+
+server/utils/sendOtp.js
+Shared backend helper for sendOtp.
+  sendOtp(): Generate/store a hashed verification OTP, enforce resend timing and send it through SMTP.
+
+server/utils/sessionCookie.js
+Shared backend helper for sessionCookie.
+  options(): Build HttpOnly, SameSite and production Secure cookie options.
+  readCookie(): Extract and decode the session cookie safely.
+  allowedOrigin(): Compare the request origin with CLIENT_ORIGIN.
+
+server/utils/solutionMode.js
+Shared backend helper for solutionMode.
+  validDsa(): Validate per-language function templates and hidden drivers.
+  publicProblem(): Strip hidden driver prefixes/suffixes from student-facing data.
+  buildExecutionCode(): Combine the allowed language’s driver and submitted function code.
+
+server/utils/startup.js
+Shared backend helper for startup.
+  initializeServices(): Initialize services in parallel with per-service deadlines and readable startup logs.
+
+server/utils/testImport.js
+Shared backend helper for testImport.
+  validateTestImport(): Check JSON shape, testcase count, input/output types, NUL characters and byte limits before import.
+
+server/workers/execution.worker.js
+Processes queued code safely and recovers unfinished work.
+  processExecution(): Claims the correct job version, grades submissions or example/custom runs, saves progress, publishes status, and handles retry/quota/permanent failures.
+  recoverPendingJobs(): Finds unfinished MongoDB records and restores missing BullMQ jobs.
+  createWorker(): Constructs the BullMQ worker with processing, retry/backoff and event handlers.
+
+========================================================================
+FRONTEND APPLICATION
+========================================================================
+
+client/src/App.jsx
+Application routes and providers.
+  ProtectedPage(): Wait for authentication, show errors, and redirect unauthorized visitors; optionally require admin.
+  App(): Compose routing, auth, realtime, layout and lazy-loaded pages.
+
+client/src/activity.js
+Pure heatmap calculations.
+  activityCalendar(): Build a year of calendar cells and compute totals, active days and longest streak.
+  activityLevel(): Map submission counts to heatmap intensity levels.
+
+client/src/api.js
+HTTP request wrapper.
+  api(): Send JSON with session credentials, support cancellation/timeouts, parse JSON and return useful errors.
+
+client/src/components/ActivityHeatmap.jsx
+Profile submission calendar.
+  ActivityHeatmap(): Choose a year, load activity and reload after realtime events.
+  Calendar(): Render accessible day cells, statistics and the legend.
+  move(): Handle arrow/Home/End keyboard movement between days.
+  describe(): Build readable date/count labels.
+
+client/src/components/Brand.jsx
+Reusable platform branding.
+  Brand(): Render the PNG logo and CodeFAMT name.
+
+client/src/components/CodeEditor.jsx
+CodeMirror editor integration.
+  CodeEditor(): Render the selected language with theme, editing settings and read-only support.
+
+client/src/components/Dialog.jsx
+Accessible reusable modal.
+  Dialog(): Manage native modal opening, scroll lock, title focus and focus restoration.
+  close(): Call onClose only when not busy.
+  isOutside(): Determine whether a pointer is outside the dialog bounds.
+  handleKeyDown(): Handle Escape and keep Tab navigation inside the dialog.
+
+client/src/components/DsaEditor.jsx
+Admin function template and driver editor. Embedded add() examples are sample solution strings, not application functions.
+  DsaEditor(): Show language templates and hidden prefix/suffix editors.
+  update(): Change one language configuration field.
+
+client/src/components/FadeContent.jsx
+Shared page wrapper.
+  FadeContent(): Render children inside the common styled wrapper.
+
+client/src/components/Layout.jsx
+Navigation and shared page shell.
+  Layout(): Render header, user navigation, mobile menu, main content and footer; adapt layout for the coding workspace.
+
+client/src/components/PasswordField.jsx
+Reusable password field.
+  PasswordField(): Render an accessible password input with visibility control.
+
+client/src/components/PlatformUI.jsx
+Shared display helpers.
+  LoadState(): Render loading/errors and a retry action.
+  EmptyState(): Render a consistent empty-content message.
+  Pagination(): Render page navigation.
+  Difficulty(): Render the difficulty label.
+  StatusBadge(): Render a status label.
+  dateTime(): Format a date/time for display.
+  contestPhase(): Determine whether a contest is draft, upcoming, live, ended or cancelled.
+
+client/src/components/StudentFields.jsx
+Shared registration/profile inputs.
+  StudentFields(): Render department and academic-year fields.
+
+client/src/context/AuthProvider.jsx
+Browser session state.
+  AuthProvider(): Provide user/loading/error state and account actions.
+  clearSession(): Clear local session state and invalidate pending responses.
+  refreshUser(): Reload the current user without letting stale responses restore an old session.
+  checkSession(): Refresh when the page is visible, including periodic checks.
+  login(): Authenticate and store only a non-secret cookie-session marker.
+  logout(): Ask the API to revoke sessions and then clear local state.
+
+client/src/context/RealtimeProvider.jsx
+Socket connection lifecycle.
+  RealtimeProvider(): Connect/disconnect Socket.IO with the current login and expose connection state.
+  useRealtime(): Return the current socket.
+  useLiveStatus(): Return connection status.
+
+client/src/context/auth.js
+Authentication context and accessor.
+  useAuth(): Read the shared authentication context.
+
+client/src/departments.js
+Shared department/year values and labels used by frontend forms and filters.
+  No named application functions; this file defines data or configuration.
+
+client/src/hooks/useApi.js
+Single-resource data hook.
+  useApi(): Fetch a resource and expose loading/error/data with cancellation of stale requests.
+  reload(): Trigger a fresh request.
+
+client/src/hooks/useCollection.js
+Collection-loading hook.
+  useCollection(): Load a named collection and manage loading/error state.
+  load(): Fetch successive pages until the collection is loaded.
+  reload(): Trigger reloading.
+
+client/src/hooks/useServerClock.js
+Server-aligned frontend clock.
+  useServerClock(): Track time relative to the server timestamp for contest UI.
+  tick(): Update the displayed clock on its timer.
+
+client/src/main.jsx
+Mounts the React App into the HTML root and imports global styles.
+  No named application functions; this file defines data or configuration.
+
+client/src/pages/AdminPage.jsx
+Contest/problem administration and hidden testcase editing.
+  dateLabel(): Format list dates.
+  localDate(): Convert a timestamp to a local datetime input value.
+  allRecords(): Fetch all pages needed for selection lists.
+  Status(): Render an admin status label.
+  Feedback(): Show error/success messages.
+  Confirmation(): Render a confirm/cancel prompt.
+  AdminPage(): Manage tabs, lists and editing dialogs.
+  changeTab(): Switch content tab and reset selection/pagination.
+  refresh(): Reload the list and optionally select a saved record.
+  deleted(): Remove a deleted record from local state and refresh.
+  ProblemEditor(): Edit draft details, examples and drivers; manage publishing.
+  update(): Update an editor field (local helper in the relevant editor).
+  updateExample(): Update a single example field.
+  save(): Save the current problem, hidden test or contest; each editor defines its own handler.
+  configureLegacy(): Add function templates to an older problem.
+  remove(): Delete the selected eligible problem, test or contest in its own editor.
+  HiddenTests(): Load/edit/delete hidden tests and import JSON.
+  edit(): Open a testcase for editing.
+  readFile(): Read and parse a selected testcase JSON file.
+  importTests(): Send validated import data to the API and refresh.
+  ContestEditor(): Edit schedule and attached problems, including nested problem creation.
+  load(): Load contest details and available problem records.
+  changeStatus(): Request an allowed contest status transition.
+  handleProblemBusy(): Propagate nested problem-editor saving state to prevent premature dialog closure.
+
+client/src/pages/AuthPage.jsx
+Sign-in, registration, verification and reset forms.
+  AuthPage(): Select the authentication screen.
+  AuthForm(): Manage form state and feedback.
+  change(): Update a form field.
+  submit(): Validate and send the action for the active form step.
+  resend(): Request a new verification/reset code.
+
+client/src/pages/ContestPage.jsx
+Contest detail and standings.
+  countdown(): Format remaining time.
+  Leaderboard(): Load and render contest rankings with updates.
+  ContestPage(): Show contest details, registration, accessible problems and standings tabs.
+  joinRoom(): Subscribe the socket to the current contest.
+  join(): Register the current student.
+  update(): Refresh contest information after relevant changes.
+
+client/src/pages/ContestsPage.jsx
+Contest listing.
+  ContestsPage(): Load and display contests with status, timing and links.
+
+client/src/pages/IntuitionPage.jsx
+Platform story and credits.
+  IntuitionPage(): Show the college-platform motivation and Saheem/Ved links.
+
+client/src/pages/LeaderboardPage.jsx
+College leaderboard.
+  solvedDate(): Format a first-solve timestamp.
+  LeaderboardPage(): Load and render ranked results and filters.
+  filter(): Change one filter and reset pagination.
+  resetFilters(): Clear selected filters.
+
+client/src/pages/ProblemPage.jsx
+Function-based coding workspace.
+  pending(): Identify queued/running states.
+  statusLabel(): Convert verdict codes into labels.
+  Verdict(): Render a styled verdict.
+  useTrackedRecord(): Track a run/submission through polling and socket events.
+  refresh(): Reload a tracked result.
+  updated(): Handle a matching realtime event.
+  readDraft(): Safely load locally saved source.
+  ProblemPage(): Load practice/contest problem context.
+  ProblemWorkspace(): Manage editor, language, examples, results and contest deadlines.
+  starterFor(): Choose the selected language starter.
+  updateCode(): Save editor changes in state/local draft storage.
+  changeLanguage(): Switch language and restore its draft.
+  execute(): Send Run with server-owned examples or Submit with hidden-test judging.
+  retry(): Retry an eligible failed submission.
+  copyCode(): Copy current source to the clipboard.
+  RunResult(): Render per-example actual/expected output or a legacy custom-run result.
+
+client/src/pages/ProblemsPage.jsx
+Practice problem library.
+  ProblemsPage(): Load accessible problems and show search, topics, difficulty and solved status.
+  filter(): Update selected library filters.
+  reset(): Clear filters.
+  update(): Refresh problem/solved information after relevant events.
+
+client/src/pages/ProfilePage.jsx
+Personal profile and statistics.
+  ProfilePage(): Show account information, solved/contest statistics and activity; manage the profile editing dialog.
+  update(): Reload profile statistics, recent solves and user information on submission/reconnect events.
+  save(): Send profile edits, refresh account information and close the editing dialog.
+  signOut(): Log out and navigate away.
+
+client/src/pages/RoadmapPage.jsx
+Learning roadmap and admin editing.
+  RoadmapPage(): Render topics, resources, progress and the editing dialog.
+  toggle(): Persist one completed-topic checkbox.
+  updateStep(): Change a draft topic field.
+  move(): Reorder a draft step.
+  save(): Submit the edited roadmap and reload content.
+
+client/src/pages/SolvedPage.jsx
+Solved problem history.
+  SolvedPage(): Load and render paginated problems solved by the current user.
+
+client/src/pages/SubmissionsPage.jsx
+Submission list and detail screens.
+  dateLabel(): Format a submission date.
+  problemLink(): Choose the practice or contest problem URL.
+  SubmissionProblemLink(): Render an available problem link.
+  SubmissionsPage(): Render paginated submission history.
+  setPage(): Change the selected history page.
+  SubmissionDetailPage(): Load the requested submission.
+  SubmissionDetail(): Show saved source, verdict, metrics and permitted retry action.
+  retry(): Request rejudging of an internal error.
+  refresh(): Fetch the latest submission record.
+
+========================================================================
+STYLES
+========================================================================
+
+client/src/App.css
+Presentation rules for App. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/Platform.css
+Presentation rules for Platform. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/components/Dialog.css
+Presentation rules for Dialog. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/index.css
+Presentation rules for index. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/AdminPage.css
+Presentation rules for AdminPage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/IntuitionPage.css
+Presentation rules for IntuitionPage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/LeaderboardPage.css
+Presentation rules for LeaderboardPage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/ProblemsPage.css
+Presentation rules for ProblemsPage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/ProfilePage.css
+Presentation rules for ProfilePage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/RoadmapPage.css
+Presentation rules for RoadmapPage. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+client/src/pages/Workspace.css
+Presentation rules for Workspace. Defines layout, typography, colors, responsive behavior and component states; no JavaScript functions.
+
+========================================================================
+TESTS
+========================================================================
+
+client/src/test/activity.test.js
+Tests for activity.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - renders leap years, month boundaries and gaps accurately
+    - handles empty years and ignores future counts
+    - uses consistent submission intensity levels
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/admin.test.jsx
+Tests for admin.test.jsx. These run during verification, not normal application requests.
+  mockLists(): Provide mock admin list responses.
+  Test callbacks check:
+    - opens contest creation in a dialog and restores focus on dismiss
+    - opens and resets a contest dialog, and dismisses only clicks outside the panel
+    - creates a problem inside a contest and retains contest details when returning
+    - requires a saved hidden test and explicit confirmation before publishing a problem
+    - keeps a published problem and its hidden tests immutable
+    - offers only unused contest problems and sends structured contest entries
+    - previews a JSON upload and appends the batch only after confirmation
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/api.test.js
+Tests for api.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - preserves the server login validation error
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/auth.test.jsx
+Tests for auth.test.jsx. These run during verification, not normal application requests.
+  reply(): Create a JSON response for a mocked request.
+  mockApi(): Set the mock API handler for auth tests.
+  open(): Render a route inside a test router.
+  fillRegistration(): Fill registration fields through test UI actions.
+  Test callbacks check:
+    - redirects an unauthenticated visitor away from protected pages
+    - rejects a non-college email before calling the API
+    - registers and verifies with all required details without persisting the password
+    - keeps the verification form usable after a wrong OTP and resends after cooldown
+    - does not allow a student to open the admin page
+    - clears a rejected session on page reload
+    - retains a session during a server outage and supports retry
+    - updates a profile and logs out through the server
+    - completes password recovery with the backend reset contract
+    - shows an actionable network error and allows retry
+    - restores a persistent cookie session after all tab storage is cleared
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/leaderboard.test.jsx
+Tests for leaderboard.test.jsx. These run during verification, not normal application requests.
+  respond(): Supply mocked leaderboard responses.
+  latestQuery(): Read the latest leaderboard request query for assertions.
+  Test callbacks check:
+    - displays shared server ranks, difficulty totals, departments and the current student
+    - combines filters, preserves them while paging and returns to page one after each filter change
+    - limits the problem picker to public problems and shows first acceptance dates for an individual problem
+    - shows request failures, supports retry and explains an empty filtered ranking
+    - keeps overall rankings usable when the problem list fails and retries the problem list separately
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/roadmap.test.jsx
+Tests for roadmap.test.jsx. These run during verification, not normal application requests.
+  Test callbacks check:
+    - students can read the sheet and ordered topics without editing controls
+    - admins can reorder topics and save exactly the editable roadmap fields
+    - a failed save keeps the edits open for correction and retry
+    - saves personal completion and leaves progress unchanged on failure
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+client/src/test/setup.js
+Initializes frontend test matchers, cleanup and browser API shims.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/src/test/workspace.test.jsx
+Tests for workspace.test.jsx. These run during verification, not normal application requests.
+  open(): Render a route inside a test router.
+  Test callbacks check:
+    - runs saved examples and displays compared results
+    - submits only the practice contract and refreshes profile after acceptance
+    - keeps language drafts separate and scopes them to the signed-in student
+    - uses server time to close contest submissions while preserving custom runs
+    - shows provider failures without claiming a verdict
+    - retries internal errors with an empty payload and preserves the submitted source
+    - loads the function template, hides CP controls, and never restores a legacy full-program draft
+    - blocks running and submitting legacy problems until drivers are configured
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/activity.test.js
+Tests for activity.test.js. These run during verification, not normal application requests.
+  response(): Create a fake Express response that captures status and JSON.
+  Test callbacks check:
+    - activity is scoped to the authenticated user and groups by India dates
+    - activity rejects another user's identifier and invalid years
+    - activity returns empty days and safe database errors
+    - real activity aggregation respects midnight in India and excludes other users
+  Opt-in flags: RUN_ACTIVITY_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/auth.middleware.test.js
+Tests for auth.middleware.test.js. These run during verification, not normal application requests.
+  token(): Create a signed JWT for an authentication scenario.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  response(): Create a fake Express response that captures status and JSON.
+  Test callbacks check:
+    - missing and malformed authorization headers cannot reach the database
+    - missing JWT configuration returns 503 without querying users
+    - invalid, expired, wrong-key and non-HS256 tokens are rejected before lookup
+    - claims require an ObjectId subject and integer token version
+    - missing, unverified and version-mismatched accounts cannot authenticate
+    - valid HS256 token attaches the verified database user and continues once
+    - database failures return a safe 500 response and do not continue
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/auth.test.js
+Tests for auth.test.js. These run during verification, not normal application requests.
+  response(): Create a fake Express response that captures status and JSON.
+  query(): Return a chainable stand-in for a Mongoose query.
+  body(): Build registration input for an auth scenario.
+  user(): Build an account fixture with scenario-specific fields.
+  record(): Build an OTP/reset record fixture.
+  prepareVerification(): Install account, OTP and database mocks for verification.
+  Test callbacks check:
+    - registration rejects noncollege email, invalid fields and oversized passwords before lookup
+    - registration saves a student account and sends an OTP without exposing credentials
+    - registration never overwrites an existing verified account
+    - verification rejects malformed stored hashes without consuming an OTP
+    - verification validates department and year before consuming a valid OTP
+    - verification consumes its exact OTP and activates the account in one transaction
+    - failed account activation rolls back OTP consumption
+    - an OTP replaced during hashing cannot verify the account
+    - one verification OTP can activate an account only once under concurrent requests
+    - concurrent OTP requests reserve one delivery and keep only a scoped hash
+    - SMTP failures expose only a safe temporary error
+    - resending an OTP for an unknown user returns a generic success without mail
+    - login issues a 30-day token and persistent HttpOnly cookie after verification
+    - logout revokes all previous tokens before disconnecting sockets
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/backend.integration.test.js
+Tests for backend.integration.test.js. These run during verification, not normal application requests.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  waitFor(): Wait for a test condition/event with a timeout.
+  Test callbacks check:
+    - live HTTP contest, compiler, transactions, Redis workers and cross-server sockets
+  Opt-in flags: RUN_BACKEND_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/compiler.integration.test.js
+Tests for compiler.integration.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - OnlineCompiler.io executes every supported language and returns usable judging metrics
+  Opt-in flags: RUN_COMPILER_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/contest.test.js
+Tests for contest.test.js. These run during verification, not normal application requests.
+  mock(): Replace a dependency temporarily and arrange restoration.
+  query(): Return a chainable stand-in for a Mongoose query.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  response(): Create a fake Express response that captures status and JSON.
+  contest(): Build a contest with overrideable schedule/status.
+  Test callbacks check:
+    - creation forces draft status and authenticated owner
+    - creation rejects duplicate problems and direct publication
+    - contest problem count is limited to 20
+    - upcoming contest details hide every problem identifier
+    - cancelled contests and nonparticipants do not reveal problems
+    - draft update validates date order
+    - publishing rejects empty contests and problems without tests
+    - publication saves only if the draft has not changed
+    - publication rejects problems already exposed by another published contest
+    - contest scores must remain exact integers when added together
+    - published and cancelled contests reject configuration changes
+    - published contests can only be cancelled before their start
+    - a draft with submissions cannot be deleted
+    - joining during a contest uses an idempotent upsert
+    - joining ends at the server deadline
+    - problem access requires the contest to start and the user to join
+    - problems open at the exact start time and joining closes at the exact end time
+    - contest problem projection includes statements but never hidden tests
+    - leaderboard filters receipt times and scores each problem once
+    - pagination rejects unbounded requests
+    - publication rejects malformed or oversized test collections before locking problems
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/db.test.js
+Tests for db.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - startup prepares indexes and queue versions without resetting active jobs
+    - temporary MongoDB connection failure retries before initializing models
+    - MongoDB authentication failures are not retried
+    - persistent connection errors stop after three attempts
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/deployment.test.js
+Tests for deployment.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - production fails early for missing secrets, bad origins and invalid ports
+    - API readiness requires the database, Redis and a recent worker heartbeat
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/dev.test.js
+Tests for dev.test.js. These run during verification, not normal application requests.
+  fixture(): Build fake process and launcher objects for development-script tests.
+  Test callbacks check:
+    - development starts API and worker with environment and watch enabled
+    - Ctrl+C stops both services only once
+    - Windows shutdown targets only the two owned process trees
+    - a failed launcher stops the other service and reports failure
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/executeCode.test.js
+Tests for executeCode.test.js. These run during verification, not normal application requests.
+  result(): Build compiler output with optional scenario overrides.
+  setResult(): Choose the compiler response returned by a mock.
+  Test callbacks check:
+    - uses the native sync endpoint, bare Authorization key and compiler IDs
+    - runs inputs sequentially and preserves their order
+    - converts seconds to milliseconds and keeps memory in KB
+    - missing and invalid metrics stay null while numeric zero remains valid
+    - program errors remain verdicts rather than provider failures
+    - known timeout exits are time limits and ambiguous signals are not guessed as memory failures
+    - warnings on stderr with a zero exit code do not reject a correct solution
+    - nonzero exits cannot accept matching output even without stderr
+    - truncated output can never accept a matching prefix
+    - a missing new provider key fails before any request
+    - rejects unsupported languages and prototype keys
+    - rejects invalid, oversized and NUL-containing source
+    - rejects invalid, oversized and NUL-containing inputs
+    - accepts source and inputs at the configured byte limits
+    - rejects malformed or infrastructure-error responses
+    - bounds each call to 35 seconds and the complete input batch to two minutes
+    - starts no more calls after the batch deadline
+    - stops after a provider failure and keeps diagnostics private
+    - handles HTTP, timeout, network and invalid JSON failures safely
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/judgeResults.test.js
+Tests for judgeResults.test.js. These run during verification, not normal application requests.
+  result(): Build compiler output with optional scenario overrides.
+  Test callbacks check:
+    - an incomplete provider result stays retryable even after an earlier wrong answer
+    - accepts matching output and converts memory from KB to MB
+    - normalizes CRLF and trailing whitespace on both outputs
+    - preserves meaningful leading whitespace, internal spaces, and internal blank lines
+    - supports empty output and a null empty stream with valid metrics
+    - does not treat API success as an accepted solution
+    - compares resource limits per test and reports peak resource use
+    - enforces time limits even when output matches
+    - enforces memory limits after converting KB to MB
+    - accepts finite zero metrics
+    - never accepts missing, negative, nonnumeric, or nonfinite metrics
+    - classifies compilation, timeout, memory, and runtime exceptions without requiring metrics
+    - a matching output never overrides a nonempty exception or stderr
+    - retains the first failing test verdict while counting later passing tests
+    - returns generic diagnostics without exposing hidden output or provider errors
+    - rejects empty, missing, sparse, and mismatched test batches
+    - rejects malformed result fields before counting any test as passed
+    - rejects missing or malformed expected outputs
+    - rejects missing, invalid, or fractional problem limits
+    - judges without changing input objects
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/leaderboard.test.js
+Tests for leaderboard.test.js. These run during verification, not normal application requests.
+  response(): Create a fake Express response that captures status and JSON.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  Test callbacks check:
+    - leaderboard rejects invalid filters and pagination before database access
+    - leaderboard preserves database ranks across pages and exposes only public profile fields
+    - a problem leaderboard requires a public problem and gives chronological ranks across pages
+    - hidden or missing problems cannot be used to query their solvers
+    - an empty leaderboard has stable pagination and zero total
+    - leaderboard database failures return a safe error
+    - real MongoDB ranks unique public solves, shared ties, cohorts and first problem acceptance
+  Opt-in flags: RUN_LEADERBOARD_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/learningWorkflow.test.js
+Tests for learningWorkflow.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - JSON imports validate every row before accepting the batch
+    - roadmaps reject script links, credentials, unknown fields and oversized lists
+    - practice access requires a published contest at or beyond its end time
+    - new runs and submissions reject CP even if explicitly requested
+    - roadmap progress is per-account, idempotent and reversible
+    - roadmap hides deleted-topic completions and retains identity after reorder
+    - roadmap rejects duplicate completion identifiers
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/passwordReset.test.js
+Tests for passwordReset.test.js. These run during verification, not normal application requests.
+  response(): Create a fake Express response that captures status and JSON.
+  query(): Return a chainable stand-in for a Mongoose query.
+  environment(): Set temporary configuration/dependencies for reset tests.
+  user(): Build an account fixture with scenario-specific fields.
+  record(): Build an OTP/reset record fixture.
+  resetBody(): Build password-reset input.
+  Test callbacks check:
+    - password reset model has a separate collection, unique user and expiry index
+    - forgot password rejects invalid college email before database access
+    - missing mail configuration returns the same unavailable response before account lookup
+    - forgot password stores a scoped HMAC and sends a six-digit code only to a verified account
+    - unknown account, cooldown and delivery failure return the same response
+    - concurrent reset-code requests reserve only one email delivery
+    - reset rejects invalid email, OTP and password inputs before lookup
+    - reset requires its HMAC secret before account lookup
+    - unknown account and unavailable reset code have the same failure
+    - incorrect and malformed stored OTP hashes never reach password hashing
+    - parallel guesses cannot exceed five reserved attempts
+    - valid reset consumes its exact OTP and changes password with session revocation in one transaction
+    - OTP replacement or expiry during hashing prevents the password update
+    - parallel submissions of one reset code can change the password only once
+    - a concurrent password or token change aborts and rolls back OTP consumption
+    - transaction failure rolls back OTP deletion and hides database details
+    - forgot password hides unexpected database errors
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/problem.test.js
+Tests for problem.test.js. These run during verification, not normal application requests.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  response(): Create a fake Express response that captures status and JSON.
+  query(): Return a chainable stand-in for a Mongoose query.
+  editable(): Build an editable problem fixture.
+  mockProblem(): Mock problem lookup/update behavior.
+  Test callbacks check:
+    - students cannot use any problem or test mutation or inspect hidden tests
+    - student lists enforce public visibility even when draft is requested
+    - student detail lookup cannot fetch a draft or contest problem
+    - problem query filters reject object injection and unbounded pagination
+    - invalid problem IDs return a client error
+    - new problems cannot forge a creator or bypass draft creation
+    - create validates the schema and assigns the authenticated creator
+    - publishing a problem without hidden tests fails
+    - publishing accepts a valid empty-input and empty-output test
+    - published and cancelled contest references freeze problem updates
+    - any submission freezes problem updates
+    - problem deletion rejects even draft contest references
+    - problem deletion cannot leave orphan test cases
+    - test creation rejects non-string values, oversized data and forged ownership
+    - a missing problem cannot receive a test case
+    - test creation accepts explicit empty strings
+    - test count is capped before execution batches become unbounded
+    - test listing explicitly retrieves hidden fields only after admin authorization
+    - a test cannot be updated through another problem's URL
+    - submissions freeze hidden test updates
+    - the last test of a published problem cannot be removed
+    - draft contest test cases stay editable until publication
+    - database failures do not expose internal messages
+    - publication freezes the definition even before the first submission
+    - test size limits count UTF-8 bytes for both inputs and expected outputs
+    - hidden tests reject NUL characters and outputs beyond the provider cap
+    - publication rejects oversized or excessive legacy test cases
+  Opt-in flags: RUN_LEADERBOARD_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/profileStats.test.js
+Tests for profileStats.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - profile statistics use only the current user and public problem counts
+    - profile statistics return a safe error on database failure
+  Opt-in flags: RUN_LEADERBOARD_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/queue.integration.test.js
+Tests for queue.integration.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - real MongoDB and Redis recover queued runs and share concurrency across two workers
+  Opt-in flags: RUN_QUEUE_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/routes.test.js
+Tests for routes.test.js. These run during verification, not normal application requests.
+  query(): Return a chainable stand-in for a Mongoose query.
+  token(): Create a signed JWT for an authentication scenario.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  Test callbacks check:
+    - every protected route rejects unauthenticated requests
+    - students cannot reach admin problem, hidden test or contest endpoints
+    - profile route returns the authenticated profile and configured browser origin
+    - authenticated students can request the college leaderboard without private profile fields
+    - an admin can read hidden tests through the nested route
+    - login issues a usable token and logout invalidates it
+    - JSON parsing rejects malformed and oversized bodies safely
+    - failed login attempts are limited per normalized email
+    - admin responses wait for commit and controller failures roll back
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/sessionCookie.test.js
+Tests for sessionCookie.test.js. These run during verification, not normal application requests.
+  response(): Create a fake Express response that captures status and JSON.
+  Test callbacks check:
+    - cookie parsing tolerates unrelated cookies and rejects malformed encodings
+    - persistent session cookie is HttpOnly and secure in production
+    - cookie sessions authenticate reads, require a trusted write origin, and remain revocable
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/socket.test.js
+Tests for socket.test.js. These run during verification, not normal application requests.
+  redisBus(): Create a message bus for Redis/socket test doubles.
+  redisServer(): Create a Redis test double for socket tests.
+  query(): Return a chainable stand-in for a Mongoose query.
+  token(): Create a signed JWT for an authentication scenario.
+  waitFor(): Wait for a test condition/event with a timeout.
+  received(): Wait for a socket event.
+  client(): Create a test socket client.
+  connected(): Wait for socket connection.
+  acknowledge(): Send a socket event and await its acknowledgement.
+  Test callbacks check:
+    - socket handshake rejects missing, invalid, expired and wrong-algorithm tokens
+    - unverified, revoked and deleted users cannot open a socket
+    - browser connections from an unconfigured origin are refused
+    - verified students can subscribe before the contest starts after joining through HTTP
+    - contest subscriptions validate IDs and refuse unjoined, draft or cancelled contests
+    - admin room access uses the database role rather than a token claim
+    - submission events reach only their owner and omit source, hidden tests and raw errors
+    - accepted verdicts invalidate only the subscribed contest leaderboard
+    - custom execution updates contain only status metadata and reach only their owner
+    - contest updates are invalidations and leaving a contest removes its subscription
+    - password changes and logout can disconnect all user devices without affecting other users
+    - a new contest subscription rechecks token revocation and disconnects stale login
+    - sockets disconnect when their login token expires
+    - periodic revalidation removes revoked users even without client messages
+    - many students can keep separate sockets and receive a shared contest update
+    - invalid publisher IDs cannot target arbitrary rooms
+    - worker events use the shared Redis namespace and include only safe payloads
+    - a Redis publish failure is contained and a later event can reconnect
+    - API and worker broadcasts cross two Socket.IO servers without leaking private events
+    - socket startup rejects failed Redis subscriptions
+    - Redis unsubscribe failures do not reject socket shutdown
+    - an older failed worker broadcast cannot disconnect a replacement Redis connection
+    - 30-day cookie sessions stay connected without overflowing the expiry timer
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/solutionMode.test.js
+Tests for solutionMode.test.js. These run during verification, not normal application requests.
+  query(): Return a chainable stand-in for a Mongoose query.
+  response(): Create a fake Express response that captures status and JSON.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  Test callbacks check:
+    - DSA configuration validates unique languages, source sizes and driver presence
+    - CP is unchanged; DSA wraps exact source without interpreting dollar substitutions
+    - student problem responses contain starters but no driver
+    - DSA run and submission save a private driver snapshot, returning only mode and source metadata
+    - DSA runs reject unavailable modes, forged drivers and inaccessible problems
+    - contest DSA runs require an opened contest and membership
+  Opt-in flags: RUN_LEADERBOARD_INTEGRATION. Use isolated test services.
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/startup.test.js
+Tests for startup.test.js. These run during verification, not normal application requests.
+  Test callbacks check:
+    - services connect concurrently but readiness waits for every dependency
+    - an unavailable service fails startup without exposing its connection URL
+    - a service that never becomes ready has a bounded startup deadline
+    - MongoDB can have a longer deadline than other startup services
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/submission.test.js
+Tests for submission.test.js. These run during verification, not normal application requests.
+  mock(): Replace a dependency temporarily and arrange restoration.
+  query(): Return a chainable stand-in for a Mongoose query.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  response(): Create a fake Express response that captures status and JSON.
+  submissionBody(): Build source/language/problem submission input.
+  providerResult(): Build an external compiler response fixture.
+  setup(): Prepare records and mocks; return observable state for assertions.
+  Test callbacks check:
+    - custom runs return queued IDs without executing code in the request
+    - run rejects hidden test selectors, unsupported languages and oversized UTF-8 code
+    - submission rejects client-owned verdicts and receipt timestamps
+    - NUL source and unexecutable hidden inputs are rejected before saving a submission
+    - a missing API key creates no submission and changes no retry state
+    - accepted submission uses server receipt and creates one unique solve
+    - provider success with incorrect output is wrong answer and adds no solve
+    - practice submissions cannot bypass contest visibility even for an admin
+    - contest submission requires membership before its server receipt
+    - contest receipt at the end deadline is rejected
+    - receipt exactly at start is valid even if judging finishes after the deadline
+    - an unconfigured test set never creates a submission
+    - queue outages retain durable submissions and return their IDs
+    - retry preserves original code and contest receipt after the contest ends
+    - retry rejects new source and rejects a submission already claimed
+    - individual submissions are scoped to their owner unless the requester is admin
+    - submission listing never accepts another user's ID or unbounded pagination
+    - a lost running claim never changes the committed result
+    - example runs snapshot server examples and reject client input overrides
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/user.test.js
+Tests for user.test.js. These run during verification, not normal application requests.
+  user(): Build an account fixture with scenario-specific fields.
+  request(): Build a controller request; HTTP integration variants send a request to the test server.
+  response(): Create a fake Express response that captures status and JSON.
+  query(): Return a chainable stand-in for a Mongoose query.
+  Test callbacks check:
+    - profile exposes only safe fields and counts the authenticated student's solves
+    - profile updates only name, department and year despite privileged extra fields
+    - invalid profile bodies cannot reach the database
+    - profile changes use schema department and year validation
+    - missing user during a profile update returns 404
+    - solved history is paginated, owned by the student, and hides problem internals
+    - solved history handles removed problems
+    - solved history rejects invalid pagination and user filter injection
+    - password changes reject invalid bodies and password lengths before querying
+    - password changes require both the current password and current session version
+    - password changes hash with cost 12 and atomically revoke all previous sessions
+    - a password or session change racing this request cannot be overwritten
+    - database failures return safe messages
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+server/tests/worker.test.js
+Tests for worker.test.js. These run during verification, not normal application requests.
+  query(): Return a chainable stand-in for a Mongoose query.
+  setup(): Prepare records and mocks; return observable state for assertions.
+  Test callbacks check:
+    - worker judges queued tests and saves the accepted verdict with the solve
+    - provider failure resumes after the last saved test
+    - provider budget delays a job without discarding progress
+    - permanent provider errors stop retries and hide diagnostics
+    - custom runs save results for the authenticated retrieval route
+    - failed solve persistence rolls back acceptance and keeps test progress
+    - an old queue version cannot execute a manually retried submission
+    - duplicate first solves retry only persistence, not execution
+    - an ambiguous commit response cannot overwrite an accepted verdict
+    - a worker that loses its claim cannot save progress or a verdict
+    - an exhausted retry becomes a retriable internal error
+    - recovery recreates missing queue jobs using the saved version
+    - example runs compare every case without awarding a solve
+    - example runs resume saved cases after a provider failure
+  Setup/cleanup hooks and anonymous mock callbacks prepare, simulate and restore the scenarios above.
+
+========================================================================
+CONFIGURATION, ASSETS AND DOCUMENTATION
+========================================================================
+
+.dockerignore
+Excludes local dependencies, secrets, tests and demo data from the Docker build context.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+.env.example
+Root Compose template for the public hostname.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+.github/workflows/ci.yml
+Runs repository hygiene, installs, tests, lint, frontend compilation and Docker image build.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+.gitignore
+Excludes dependencies, builds, secrets, logs and backups from Git; allows environment templates.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+Dockerfile
+Builds the client, installs locked production server dependencies and runs Node as a non-root user.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+README.md
+Main project overview, setup, contest workflow, checks, deployment and capacity notes.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/.gitignore
+Client-specific ignore rules for generated/local files.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/.oxlintrc.json
+Frontend lint configuration and rule settings.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/THIRD_PARTY_NOTICES.md
+Third-party attribution and licensing information.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/index.html
+Browser document with metadata, PNG favicon, root element and main.jsx entry module.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/package-lock.json
+Exact frontend dependencies for reproducible npm ci installs.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/package.json
+Frontend dependencies, supported Node version and npm commands.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/public/Inter-OFL.txt
+License for the bundled Inter font.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/public/codefamt-logo.png
+Platform logo and browser favicon.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/public/test-cases.example.json
+Downloadable JSON import example for hidden testcases.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+client/vite.config.js
+Configures React, fixed development port, API/socket proxies and Vitest. configure(proxy) registers an error callback that returns a readable JSON 503 if the API is unavailable.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+compose.yaml
+Defines Caddy, API, worker and persistent Redis, including networking, health checks and ports.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+deploy/Caddyfile
+Configures HTTPS, compression, HSTS and reverse proxying to the API.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+scripts/check-repository.cjs
+Top-level script: reads git ls-files and rejects tracked dependencies, builds, private environment files, logs and key filenames.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+server/.env.example
+API/worker environment variable template. Actual credentials belong in ignored files.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+server/fixtures/cpp-roadmap.json
+Development C++/DSA roadmap content used by the reset utility.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+server/fixtures/draft-problems.json
+Demo problems, example inputs, hidden drivers/tests and reference solutions. Embedded solution functions belong to sample programs, not the API.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+server/package-lock.json
+Exact server dependencies, including patched transitive packages.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+server/package.json
+Backend dependencies, supported Node version and API/worker/test npm commands.
+  Data/configuration file or top-level setup; no separate business-logic functions.
+
+guide.txt
+This plain-text walkthrough; no executable code. Update it when files or functions change.
