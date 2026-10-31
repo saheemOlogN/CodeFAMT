@@ -28,12 +28,14 @@ export default function Layout({ children }) {
                 <NavLink to="/problems">Problems</NavLink>
                 <NavLink to="/contests">Contests</NavLink>
                 <NavLink to="/roadmap">Roadmap</NavLink>
+                <NavLink to="/intuition">Intuition</NavLink>
                 <NavLink to="/leaderboard">Leaderboard</NavLink>
                 <NavLink to="/submissions">Submissions</NavLink>
                 {user.role === 'admin' && <NavLink to="/admin">Admin</NavLink>}
               </>
             ) : (
               <>
+                <NavLink to="/intuition">Intuition</NavLink>
                 <NavLink to="/login">Sign in</NavLink>
                 <NavLink to="/register" className="register-link">
                   Create account
@@ -46,7 +48,7 @@ export default function Layout({ children }) {
       </header>
       <main id="main">{children}</main>
       {!isWorkspace && <footer className="site-footer">
-        <span>CodeFAMT</span>
+        <Link to="/intuition">Intuition · About CodeFAMT</Link>
         <span>Finolex Academy of Management and Technology</span>
       </footer>}
     </div>

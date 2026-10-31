@@ -15,6 +15,7 @@ import SolvedPage from './pages/SolvedPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 import RoadmapPage from './pages/RoadmapPage'
+import IntuitionPage from './pages/IntuitionPage'
 import { RealtimeProvider } from './context/RealtimeProvider'
 import './App.css'
 import './Platform.css'
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/solved" element={<ProtectedPage><SolvedPage /></ProtectedPage>} />
             <Route path="/leaderboard" element={<ProtectedPage><LeaderboardPage /></ProtectedPage>} />
             <Route path="/roadmap" element={<ProtectedPage><RoadmapPage /></ProtectedPage>} />
+            <Route path="/intuition" element={<IntuitionPage />} />
             <Route path="/login" element={<AuthPage mode="login" />} />
             <Route path="/register" element={<AuthPage mode="register" />} />
             <Route

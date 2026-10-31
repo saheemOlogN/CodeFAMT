@@ -1,0 +1,15 @@
+.intuition-page { max-width: 960px; padding-top: 64px; }
+.intuition-intro { max-width: 740px; }
+.intuition-eyebrow, .intuition-role { color: var(--muted); font-size: 13px; font-weight: 600; }
+.intuition-intro h1 { margin: 12px 0 24px; font-size: clamp(30px, 5vw, 44px); line-height: 1.15; letter-spacing: -1px; }
+.intuition-page p { line-height: 1.8; color: var(--muted); }
+.intuition-intro .intuition-question { font-size: clamp(20px, 3vw, 26px); line-height: 1.5; font-weight: 600; color: var(--text, #eee); margin-bottom: 18px; }
+.intuition-page h2 { font-size: 20px; margin-bottom: 16px; }
+.intuition-purpose { border-top: 1px solid var(--line); padding-top: 32px; margin: 36px 0; }
+.intuition-purpose p + p { margin-top: 12px; }
+.intuition-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; }
+.intuition-people section { border-top: 1px solid var(--line); padding-top: 20px; }
+.intuition-people h3 { font-size: 22px; margin: 6px 0 10px; }
+.intuition-people a { display: inline-block; margin-top: 18px; color: #8abfff; font-size: 14px; text-underline-offset: 4px; }
+.intuition-people a:hover { text-decoration: underline; }
+@media (max-width: 600px) { .intuition-page { padding-top: 36px; } .intuition-people { grid-template-columns: 1fr; } }
