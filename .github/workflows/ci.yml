@@ -12,6 +12,7 @@ jobs:
           cache-dependency-path: |
             client/package-lock.json
             server/package-lock.json
+      - run: node scripts/check-repository.cjs
       - run: npm ci
         working-directory: server
       - run: npm test
@@ -24,3 +25,5 @@ jobs:
         working-directory: client
       - run: npm run build
         working-directory: client
+      - name: Build production image
+        run: docker build --tag codefamt:ci .
