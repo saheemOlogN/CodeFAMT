@@ -181,3 +181,32 @@ test("recovery recreates missing queue jobs using the saved version", async t =>
     assert.equal(recovered._id, state.record._id);
     assert.equal(recovered.queueVersion, 0);
 });
+
+
+test("example runs compare every case without awarding a solve", async t => {
+    const state = setup(t, "run");
+    state.record.sampleCases = [{ input: "one", expectedOutput: "one", displayInput: "nums = [1]" }, { input: "two", expectedOutput: "different" }];
+    state.record.runLimits = { timeLimitMs: 1000, memoryLimitMb: 128 };
+    await processExecution(state.job, "lock");
+    assert.equal(state.record.result.passedTests, 1);
+    assert.equal(state.record.result.totalTests, 2);
+    assert.equal(state.record.result.cases[0].input, "nums = [1]");
+    assert.equal(state.record.result.cases[1].status, "wrong_answer");
+    assert.equal(state.solves, 0);
+});
+
+test("example runs resume saved cases after a provider failure", async t => {
+    const state = setup(t, "run");
+    state.record.sampleCases = [{ input: "one", expectedOutput: "one" }, { input: "two", expectedOutput: "two" }];
+    state.record.runLimits = { timeLimitMs: 1000, memoryLimitMb: 128 };
+    let calls = 0;
+    t.mock.method(execution, "executeCode", async ({ inputs }) => {
+        if (++calls === 2) throw new Error("Temporary failure");
+        return [{ stdout: inputs[0], stderr: null, exception: null, exitCode: 0, executionTime: 10, memoryUsed: 1024 }];
+    });
+    await assert.rejects(processExecution(state.job, "lock"), /Temporary failure/);
+    assert.equal(state.record.caseResults.length, 1);
+    await processExecution(state.job, "lock");
+    assert.equal(calls, 3);
+    assert.equal(state.record.result.passedTests, 2);
+});

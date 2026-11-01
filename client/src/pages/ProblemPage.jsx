@@ -95,7 +95,7 @@ function ProblemWorkspace({ problemId, contestId }) {
   const mode = 'dsa'
   const [language, setLanguage] = useState('cpp')
   const [code, setCode] = useState('')
-  const [input, setInput] = useState('')
+  const [selectedExample, setSelectedExample] = useState(0)
   const [tab, setTab] = useState('input')
   const [run, setRun] = useState(null)
   const [submission, setSubmission] = useState(null)
@@ -170,13 +170,9 @@ function ProblemWorkspace({ problemId, contestId }) {
       setActionError('Enter a solution of up to 50,000 bytes without NUL characters.')
       return
     }
-    if (kind === 'run' && (input.includes('\0') || encoder.encode(input).length > 100000)) {
-      setActionError('Input must be at most 100,000 bytes and contain no NUL characters.')
-      return
-    }
     setBusy(kind)
     try {
-      const body = kind === 'run' ? { language, code, input } : { problemId, language, code, ...(contestId ? { contestId } : {}) }
+      const body = kind === 'run' ? { language, code, runExamples: true } : { problemId, language, code, ...(contestId ? { contestId } : {}) }
       if (mode === 'dsa') Object.assign(body, { mode, problemId, ...(contestId ? { contestId } : {}) })
       const result = await api(kind === 'run' ? '/submissions/run' : '/submissions', { method: 'POST', body, token })
       if (!mounted.current) return
@@ -235,9 +231,7 @@ function ProblemWorkspace({ problemId, contestId }) {
             <div className="workspace-title-line"><h1>{problem.title}</h1></div>
             <div className="workspace-metadata"><span className={`workspace-difficulty workspace-${problem.difficulty}`}>{statusLabel(problem.difficulty)}</span><span><Clock3 size={13} />{problem.timeLimitMs} ms</span><span>{problem.memoryLimitMb} MB</span>{data.points !== undefined && <span>{data.points} points</span>}</div>
             <p className="workspace-prose">{problem.statement}</p>
-            <section className="workspace-section"><h2>Input</h2><p className="workspace-prose">{problem.inputFormat}</p></section>
-            <section className="workspace-section"><h2>Output</h2><p className="workspace-prose">{problem.outputFormat}</p></section>
-            {problem.examples?.map((example, index) => <section className="workspace-section" key={index}><h2>Example {index + 1}</h2><div className="workspace-example"><div><span>Input</span><pre>{example.input || '(empty)'}</pre></div><div><span>Output</span><pre>{example.output || '(empty)'}</pre></div></div>{example.explanation && <p className="workspace-explanation">{example.explanation}</p>}<button className="workspace-text-button" onClick={() => { setInput(example.input || ''); setTab('input') }}><Play size={12} />Use as input</button></section>)}
+            {problem.examples?.map((example, index) => <section className="workspace-section" key={index}><h2>Example {index + 1}</h2><div className="workspace-example"><div><span>Input</span><pre>{example.displayInput || example.input || '(empty)'}</pre></div><div><span>Output</span><pre>{example.output || '(empty)'}</pre></div></div>{example.explanation && <p className="workspace-explanation">{example.explanation}</p>}<button className="workspace-text-button" onClick={() => { setSelectedExample(index); setTab('input') }}><Play size={12} />View testcase</button></section>)}
             <section className="workspace-section"><h2>Constraints</h2><p className="workspace-prose workspace-constraints">{problem.constraints}</p></section>
             {problem.tags?.length > 0 && <div className="workspace-tags">{problem.tags.map(tag => <span key={tag}>{tag}</span>)}</div>}
           </div>
@@ -253,16 +247,16 @@ function ProblemWorkspace({ problemId, contestId }) {
           <CodeEditor value={code} onChange={updateCode} language={language} />
           <div className="workspace-console">
             <div className="workspace-console-tabs" role="tablist" aria-label="Execution panels">
-              <button role="tab" aria-selected={tab === 'input'} aria-controls="workspace-input" id="workspace-input-tab" onClick={() => setTab('input')}><Terminal size={14} />Input</button>
-              <button role="tab" aria-selected={tab === 'output'} aria-controls="workspace-output" id="workspace-output-tab" onClick={() => setTab('output')}>Output{pending(run?.status) && <LoaderCircle size={12} className="workspace-spin" />}</button>
+              <button role="tab" aria-selected={tab === 'input'} aria-controls="workspace-input" id="workspace-input-tab" onClick={() => setTab('input')}><Terminal size={14} />Testcases</button>
+              <button role="tab" aria-selected={tab === 'output'} aria-controls="workspace-output" id="workspace-output-tab" onClick={() => setTab('output')}>Test result{pending(run?.status) && <LoaderCircle size={12} className="workspace-spin" />}</button>
               <button role="tab" aria-selected={tab === 'verdict'} aria-controls="workspace-verdict" id="workspace-verdict-tab" onClick={() => setTab('verdict')}>Verdict{pending(submission?.status) && <LoaderCircle size={12} className="workspace-spin" />}</button>
             </div>
-            {tab === 'input' && <div className="workspace-console-body" role="tabpanel" id="workspace-input" aria-labelledby="workspace-input-tab"><textarea aria-label="Custom input" value={input} onChange={event => setInput(event.target.value)} placeholder="Standard input" spellCheck="false" /></div>}
+            {tab === 'input' && <div className="workspace-console-body" role="tabpanel" id="workspace-input" aria-labelledby="workspace-input-tab">{problem.examples?.length ? <><div className="example-tabs" role="tablist" aria-label="Example testcases">{problem.examples.map((example, index) => <button key={index} role="tab" aria-selected={selectedExample === index} onClick={() => setSelectedExample(index)}>Case {index + 1}</button>)}</div><p className="workspace-muted">Run checks all {problem.examples.length} example testcases.</p><div className="workspace-example"><div><span>Input</span><pre>{problem.examples[selectedExample]?.displayInput || problem.examples[selectedExample]?.input || '(empty)'}</pre></div><div><span>Expected</span><pre>{problem.examples[selectedExample]?.output || '(empty)'}</pre></div></div></> : <p className="workspace-muted">The author has not added example testcases yet.</p>}</div>}
             {tab === 'output' && <div className="workspace-console-body" role="tabpanel" id="workspace-output" aria-labelledby="workspace-output-tab"><RunResult run={run} />{runError && <p className="workspace-error" role="alert">{runError}</p>}</div>}
             {tab === 'verdict' && <div className="workspace-console-body" role="tabpanel" id="workspace-verdict" aria-labelledby="workspace-verdict-tab">{submission ? <><div className="workspace-result-heading"><Verdict status={submission.status} /><Link to={`/submissions/${submission._id}`}>View submission</Link></div><div className="workspace-result-metrics"><span>{submission.passedTests} / {submission.totalTests} tests passed</span>{submission.executionTimeMs != null && <span>{submission.executionTimeMs} ms</span>}{submission.memoryUsedMb != null && <span>{submission.memoryUsedMb.toFixed(2)} MB</span>}</div>{pending(submission.status) && <p className="workspace-muted">{submission.status === 'queued' ? 'Waiting for the judge...' : 'Judging your solution...'}</p>}{submission.errorMessage && <p className="workspace-error">{submission.errorMessage}</p>}{submission.status === 'internal_error' && <button className="workspace-button" onClick={retry} disabled={Boolean(busy)}><RefreshCw size={14} />Retry judging</button>}</> : <p className="workspace-muted">No submission yet.</p>}{submissionError && <p className="workspace-error" role="alert">{submissionError}</p>}</div>}
           </div>
           {actionError && <p className="workspace-action-error" role="alert">{actionError}</p>}
-          <div className="workspace-action-bar">{contestId && !contestActive && <span className="workspace-muted">Submissions are closed</span>}<button className="workspace-button" onClick={() => execute('run')} disabled={!dsaConfigs.length || executionPending}>{busy === 'run' || pending(run?.status) ? <LoaderCircle size={15} className="workspace-spin" /> : <Play size={15} />}Run</button><button className="workspace-button workspace-primary" onClick={() => execute('submit')} disabled={!dsaConfigs.length || executionPending || !contestActive}>{busy === 'submit' || pending(submission?.status) ? <LoaderCircle size={15} className="workspace-spin" /> : <Send size={15} />}Submit</button></div>
+          <div className="workspace-action-bar">{contestId && !contestActive && <span className="workspace-muted">Submissions are closed</span>}<button className="workspace-button" onClick={() => execute('run')} disabled={!dsaConfigs.length || !problem.examples?.length || executionPending}>{busy === 'run' || pending(run?.status) ? <LoaderCircle size={15} className="workspace-spin" /> : <Play size={15} />}Run</button><button className="workspace-button workspace-primary" onClick={() => execute('submit')} disabled={!dsaConfigs.length || executionPending || !contestActive}>{busy === 'submit' || pending(submission?.status) ? <LoaderCircle size={15} className="workspace-spin" /> : <Send size={15} />}Submit</button></div>
         </section>
       </div>
     </div>
@@ -275,5 +269,7 @@ function RunResult({ run }) {
   if (run.status === 'internal_error') return <p className="workspace-error">{run.errorMessage || 'Execution is unavailable. Run your code again to retry.'}</p>
   const result = run.result
   if (!result) return <p className="workspace-muted">Loading output...</p>
+  if (result.cases) return <><div className="workspace-result-heading"><strong className={result.passedTests === result.totalTests ? 'submission-accepted' : 'workspace-error'}>{result.passedTests === result.totalTests ? 'All examples passed' : 'Some examples failed'}</strong><span>{result.passedTests} / {result.totalTests}</span></div>{result.cases.map((item, index) => <section className="example-result" key={index}><div className="workspace-result-heading"><strong>Case {index + 1}</strong><Verdict status={item.status} /></div><div className="workspace-example"><div><span>Input</span><pre>{item.input || '(empty)'}</pre></div><div><span>Your output</span><pre>{item.stdout || '(empty)'}</pre></div><div><span>Expected</span><pre>{item.expectedOutput || '(empty)'}</pre></div></div>{item.stderr && <pre className="workspace-output workspace-error">{item.stderr}</pre>}</section>)}</>
+
   return <><div className="workspace-result-heading"><span className={result.exception ? 'workspace-error' : 'submission-accepted'}>{result.exception || 'Execution completed'}</span><span className="workspace-muted">{result.executionTime != null ? `${result.executionTime} ms` : ''}{result.memoryUsed != null ? ` / ${(result.memoryUsed / 1024).toFixed(2)} MB` : ''}</span></div><pre className="workspace-output">{result.stdout || '(no standard output)'}</pre>{result.stderr && <pre className="workspace-output workspace-error">{result.stderr}</pre>}{result.truncated && <p className="workspace-error">Output was truncated.</p>}</>
 }

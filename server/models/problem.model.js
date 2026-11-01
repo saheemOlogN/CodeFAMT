@@ -46,6 +46,7 @@ const problemSchema = new mongoose.Schema(
             {
                 _id: false,
                 input: { type: String, default: "" },
+                displayInput: { type: String, default: "", maxlength: 2000 },
                 output: { type: String, default: "" },
                 explanation: { type: String, default: "" },
             },

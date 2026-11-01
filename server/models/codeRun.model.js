@@ -12,6 +12,9 @@ const codeRunSchema = new mongoose.Schema(
             required: true,
         },
         mode: { type: String, enum: ["cp", "dsa"], default: "cp" },
+        sampleCases: { type: [new mongoose.Schema({ input: String, expectedOutput: String, displayInput: String }, { _id: false })], default: undefined, select: false },
+        caseResults: { type: [mongoose.Schema.Types.Mixed], default: [], select: false },
+        runLimits: { type: new mongoose.Schema({ timeLimitMs: Number, memoryLimitMb: Number }, { _id: false }), select: false },
         executionCode: { type: String, select: false },
         code: {
             type: String,

@@ -34,9 +34,10 @@ function submissionResponse(submission) {
 async function runCode(req, res) {
     try {
         const body = req.body || {};
-        const { language, code, input = "", mode = "dsa", problemId, contestId } = body;
+        const { language, code, input = "", mode = "dsa", problemId, contestId, runExamples = false } = body;
 
-        if (Array.isArray(body) || Object.keys(body).some((key) => !["language", "code", "input", "mode", "problemId", "contestId"].includes(key)) ||
+        if (Array.isArray(body) || Object.keys(body).some((key) => !["language", "code", "input", "mode", "problemId", "contestId", "runExamples"].includes(key)) ||
+            typeof runExamples !== "boolean" || (runExamples && body.input !== undefined) ||
             mode !== "dsa" ||
             typeof language !== "string" || !Object.hasOwn(languages, language) ||
             typeof code !== "string" || !code.trim() || code.includes("\0") || Buffer.byteLength(code, "utf8") > 50000 ||
@@ -48,7 +49,7 @@ async function runCode(req, res) {
             return res.status(503).json({ message: "Code execution is not configured yet" });
         }
 
-        let executionCode;
+        let executionCode, sampleCases, runLimits;
         if (mode === "dsa") {
             if (!mongoose.isObjectIdOrHexString(problemId) || (contestId !== undefined && !mongoose.isObjectIdOrHexString(contestId))) {
                 return res.status(400).json({ message: "DSA runs require a valid problem ID and optional contest ID" });
@@ -64,6 +65,18 @@ async function runCode(req, res) {
                 return res.status(404).json({ message: "Problem not found" });
             }
             executionCode = buildExecutionCode(problem, mode, language, code);
+            if (runExamples) {
+                const examples = problem.examples;
+                if (!examples?.length || examples.length > 10 || examples.some(example =>
+                    typeof example.input !== 'string' || typeof example.output !== 'string' ||
+                    example.input.includes('\0') || example.output.includes('\0') ||
+                    Buffer.byteLength(example.input) > 100000 || Buffer.byteLength(example.output) > 65536)) {
+                    return res.status(400).json({ message: 'The author must configure 1 to 10 valid examples before running them.' });
+                }
+                sampleCases = examples.map(example => ({ input: example.input, expectedOutput: example.output, displayInput: example.displayInput || example.input }));
+                runLimits = { timeLimitMs: problem.timeLimitMs, memoryLimitMb: problem.memoryLimitMb };
+            }
+
         } else if (problemId !== undefined || contestId !== undefined) {
             return res.status(400).json({ message: "CP runs accept only language, code, input and mode" });
         }
@@ -74,6 +87,8 @@ async function runCode(req, res) {
             code,
             mode,
             executionCode,
+            sampleCases,
+            runLimits,
             input,
             status: "queued",
         });

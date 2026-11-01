@@ -120,3 +120,8 @@
 .solution-mode button[aria-pressed='true'] { background: #414146; color: #fafafa; }
 .workspace-mode-help { margin: 0; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted); line-height: 1.6; }
 .editor-toolbar { flex-wrap: wrap; gap: 10px; }
+
+.example-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.example-tabs button { padding: 6px 12px; border-radius: 6px; background: #292929; border: 1px solid transparent; color: #bbb; }
+.example-tabs button[aria-selected="true"] { border-color: #555; color: #fff; }
+.example-result { border-top: 1px solid #383838; padding-top: 16px; margin-top: 16px; }

@@ -8,6 +8,7 @@ const queue = require("../utils/executionQueue");
 const execution = require("../utils/executeCode");
 const providerLimit = require("../utils/providerLimit");
 const realtime = require("../utils/realtime");
+const judgeResults = require('../utils/judgeResults');
 const gradeSubmission = require("../utils/gradeSubmission");
 const { createRedisConnection } = require("../config/redis");
 
@@ -20,7 +21,7 @@ async function processExecution(job, token) {
         { _id: job.data.id, queueVersion: job.data.version, status: { $in: ["queued", "running"] } },
         { $set: { status: "running", processingToken: claim } },
         { returnDocument: "after" }
-    ).select("+code +executionCode +input +judgeProgress +processingToken");
+    ).select("+code +executionCode +input +judgeProgress +processingToken +sampleCases +caseResults +runLimits");
     if (!record) return;
     const filter = { _id: record._id, queueVersion: job.data.version, processingToken: claim, status: "running" };
     await publish(record);
@@ -40,6 +41,23 @@ async function processExecution(job, token) {
                 throw new UnrecoverableError("Submission test data is invalid");
             }
             await gradeSubmission(record, problem, tests);
+        } else if (record.sampleCases?.length) {
+            const cases = [...(record.caseResults || [])];
+            for (let index = cases.length; index < record.sampleCases.length; index++) {
+                await providerLimit.reserveProviderRun();
+                const sample = record.sampleCases[index];
+                const results = await execution.executeCode({ language: record.language, code: record.executionCode || record.code, inputs: [sample.input] });
+                const verdict = judgeResults(results, [sample], record.runLimits);
+                if (verdict.status === 'internal_error') throw new Error('Invalid compiler result');
+                cases.push({ input: sample.displayInput || sample.input, expectedOutput: sample.expectedOutput,
+                    ...results[0], status: verdict.status });
+                const updated = await Model.updateOne(filter, { $set: { caseResults: cases } });
+                if (updated.matchedCount !== 1) return;
+            }
+            const saved = await Model.findOneAndUpdate(filter, {
+                $set: { status: 'completed', result: { cases, passedTests: cases.filter(item => item.status === 'accepted').length, totalTests: cases.length }, processingToken: null },
+            }, { returnDocument: 'after' });
+            await publish(saved);
         } else {
             await providerLimit.reserveProviderRun();
             const results = await execution.executeCode({ language: record.language, code: record.executionCode || record.code, inputs: [record.input] });

@@ -397,3 +397,23 @@ test("a lost running claim never changes the committed result", async () => {
     assert.equal(state.submission.status, "accepted");
     assert.equal(state.errorFilter.status, "running");
 });
+
+
+test("example runs snapshot server examples and reject client input overrides", async () => {
+    const state = setup();
+    state.problem.examples = [{ input: "raw", output: "expected", displayInput: "nums = [1]" }];
+    let saved;
+    mock(CodeRun, "create", async fields => { saved = fields; return { _id: submissionId, ...fields }; });
+    const res = response();
+    await controller.runCode(request({ ...submissionBody(), runExamples: true }), res);
+    assert.equal(res.statusCode, 202);
+    assert.deepEqual(saved.sampleCases, [{ input: "raw", expectedOutput: "expected", displayInput: "nums = [1]" }]);
+    assert.equal(state.testLoads, 0);
+    const invalid = response();
+    await controller.runCode(request({ ...submissionBody(), runExamples: true, input: "override" }), invalid);
+    assert.equal(invalid.statusCode, 400);
+    state.problem.examples = [];
+    const empty = response();
+    await controller.runCode(request({ ...submissionBody(), runExamples: true }), empty);
+    assert.equal(empty.statusCode, 400);
+});

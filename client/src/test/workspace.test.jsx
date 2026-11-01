@@ -28,17 +28,17 @@ beforeEach(() => {
 })
 
 describe('Coding workspace', () => {
-  it('runs custom input, polls the queued result, and displays diagnostics', async () => {
+  it('runs saved examples and displays compared results', async () => {
     vi.mocked(api).mockImplementation(async path => path === '/submissions/run'
       ? { run: { _id: 'run-1', status: 'queued', language: 'cpp' } }
-      : { run: { _id: 'run-1', status: 'completed', result: { stdout: '5\n', stderr: '', executionTime: 20, memoryUsed: 1024, exception: null } } })
+      : { run: { _id: 'run-1', status: 'completed', result: { cases: [{ input: 'a = 2, b = 3', stdout: '5', expectedOutput: '5', status: 'accepted' }], passedTests: 1, totalTests: 1 } } })
     open(`/problems/${problemId}`)
     fireEvent.change(screen.getByLabelText('Code editor'), { target: { value: 'int main() {}' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Use as input' }))
+    fireEvent.click(screen.getByRole('button', { name: 'View testcase' }))
     fireEvent.click(screen.getByRole('button', { name: 'Run', exact: true }))
-    expect(await screen.findByText('Execution completed')).toBeVisible()
+    expect(await screen.findByText('All examples passed')).toBeVisible()
     expect(screen.getByRole('tabpanel')).toHaveTextContent('5')
-    expect(api).toHaveBeenCalledWith('/submissions/run', expect.objectContaining({ method: 'POST', body: { mode: 'dsa', problemId, language: 'cpp', code: 'int main() {}', input: '2 3' } }))
+    expect(api).toHaveBeenCalledWith('/submissions/run', expect.objectContaining({ method: 'POST', body: { mode: 'dsa', problemId, language: 'cpp', code: 'int main() {}', runExamples: true } }))
     expect(api).toHaveBeenCalledWith('/submissions/runs/run-1', expect.objectContaining({ token: 'token' }))
   })
 

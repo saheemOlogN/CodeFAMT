@@ -14,7 +14,20 @@
       {
         "input": "5\n1 2 3 4 5\n",
         "output": "15",
-        "explanation": "The function returns 15."
+        "explanation": "The function returns 15.",
+        "displayInput": "nums = [1, 2, 3, 4, 5]"
+      },
+      {
+        "input": "4\n-2 0 2 0\n",
+        "displayInput": "nums = [-2, 0, 2, 0]",
+        "output": "0",
+        "explanation": "The positive and negative values cancel out."
+      },
+      {
+        "input": "3\n1000000000 1000000000 1000000000\n",
+        "displayInput": "nums = [1000000000, 1000000000, 1000000000]",
+        "output": "3000000000",
+        "explanation": "The sum exceeds a 32-bit signed integer. Use a 64-bit accumulator."
       }
     ],
     "timeLimitMs": 2000,
@@ -63,7 +76,8 @@
       {
         "input": "5\n3 1 9 2 4\n",
         "output": "9",
-        "explanation": "The function returns 9."
+        "explanation": "The function returns 9.",
+        "displayInput": "nums = [3, 1, 9, 2, 4]"
       }
     ],
     "timeLimitMs": 2000,
@@ -112,7 +126,8 @@
       {
         "input": "6\n1 2 2 2 5 8\n2\n",
         "output": "1",
-        "explanation": "The function returns 1."
+        "explanation": "The function returns 1.",
+        "displayInput": "nums = [1, 2, 2, 2, 5, 8], target = 2"
       }
     ],
     "timeLimitMs": 2000,
